@@ -1,6 +1,6 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# music-ttranscribe
+# music-video-creator
 
 Non-linear music video editor with export to MP4 and Blender files.
 
@@ -83,4 +83,4 @@ Helpers for recording finished media URLs in `plan.json`:
 
 More about how the app is put together: [app/README.md](app/README.md).
 
-Created in [T3 Code](https://t3.codes).
+MIT licensed, see [LICENSE](LICENSE). Created in [T3 Code](https://t3.codes).
