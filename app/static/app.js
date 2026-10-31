@@ -914,10 +914,13 @@ function renderInspector() {
       <textarea data-field="extra" rows="2" placeholder="e.g. hands in frame, no tiger in this one" ${lock}>${esc(val("extra"))}</textarea></label>
     <div class="actions">
       <button class="btn" id="iSave" ${dirty ? "" : "disabled"}>Save</button>
+      <button class="btn" id="iAsk" ${s.locked ? "disabled" : ""}>Ask for a change…</button>
       <button class="btn" id="iPropose" ${s.locked ? "disabled" : ""}>Rewrite prompts from beat</button>
       ${dirty ? `<button class="btn quiet" id="iDiscard">Discard edits</button>` : ""}
     </div>
     ${proposalView(s)}
+    ${s.asks?.length ? `<details class="asks"><summary class="muted small">Changes asked for (${s.asks.length})</summary>
+      <ul>${s.asks.map((a) => `<li>${esc(a.text)}</li>`).join("")}</ul></details>` : ""}
   </div>
 
   <div class="block">
@@ -1048,6 +1051,7 @@ function bindInspector(s) {
   $("#iSave").onclick = () => saveDrafts(id);
   $("#iDiscard") && ($("#iDiscard").onclick = () => { delete S.drafts[id]; S.inspKey = ""; renderInspector(); });
   $("#iPropose").onclick = () => propose(id);
+  $("#iAsk").onclick = () => openChange([id]);
   $("#iAddRef").onclick = () => $("#iRefFile").click();
   $("#iRefFile").onchange = (e) => act(async () => {
     const f = e.target.files[0];
@@ -1103,6 +1107,132 @@ async function applyProposal(id, regen) {
   if (regen) generateStills([id]);
 }
 
+// ===================================================== ask for a change
+// Type what you want ("the fence should be red"); the storyboard model merges it
+// into the existing prompts with the smallest edit, and you accept the diff.
+// Polish is the separate, opt-in rewrite. Nothing here generates a still.
+async function openChange(uids) {
+  for (const id of uids) if (S.drafts[id] && Object.keys(S.drafts[id]).length) await saveDrafts(id);
+  const secs = uids.map(secById).filter(Boolean);
+  const open = secs.filter((s) => !s.locked);
+  const locked = secs.length - open.length;
+  if (!open.length) return toast("Those sections are locked. Unlock them to change their prompts.", true);
+  const dlg = $("#dlg");
+  const scope = open.length === 1
+    ? `${tc(open[0].start)} · ${esc(captionText(open[0].start, open[0].end) || "Instrumental")}`
+    : `${open.length} sections, ${tc(open[0].start)} – ${tc(open[open.length - 1].end)}`;
+  const C = { text: "", polish: false, result: null, accept: {} };
+
+  const compose = () => {
+    dlg.innerHTML = `
+      <div class="dh"><h2>Ask for a change</h2><p class="muted small" style="margin:4px 0 0">${scope}${locked ? ` · ${locked} locked section${locked > 1 ? "s" : ""} skipped` : ""}</p></div>
+      <div class="db">
+        <textarea id="chText" rows="3" class="ask-box" placeholder="e.g. the fence should be red · make it night · the dragon wears the apron">${esc(C.text)}</textarea>
+        <p class="muted small">Only what you ask for changes; the rest of the prompt is kept word for word. <b>Polish wording</b> rewrites the prompts more freely without changing what's in them, and also applies anything you type here.</p>
+      </div>
+      <div class="df"><span class="note">Nothing is generated. You'll see the changes before anything is saved.</span>
+        <button class="btn quiet" id="chCancel">Cancel</button>
+        <button class="btn" id="chPolish">Polish wording</button>
+        <button class="btn primary" id="chGo">Propose change</button></div>`;
+    const box = $("#chText");
+    const go = (polish) => {
+      C.text = box.value.trim();
+      if (!polish && !C.text) { box.focus(); return toast("Type what you want changed, or use Polish wording.", true); }
+      C.polish = polish;
+      ask();
+    };
+    box.oninput = () => (C.text = box.value);
+    box.onkeydown = (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) go(false); };
+    $("#chCancel").onclick = () => dlg.close();
+    $("#chPolish").onclick = () => go(true);
+    $("#chGo").onclick = () => go(false);
+    setTimeout(() => box.focus(), 0);
+  };
+
+  const ask = async () => {
+    dlg.innerHTML = `<div class="db ask-wait"><div class="clock" aria-hidden="true"><i class="hand-h"></i><i class="hand-m"></i></div>
+      <p>${C.polish ? "Polishing" : "Working your change into"} ${open.length === 1 ? "the prompts" : `${open.length} sections`}…</p></div>`;
+    const r = await act(() => api("POST", `songs/${S.slug}/change`, { uids: open.map((s) => s.uid), text: C.text, polish: C.polish }));
+    if (!dlg.open) return;
+    if (!r) return compose();
+    C.result = r;
+    C.accept = {};
+    for (const row of r.rows) {
+      const s = secById(row.uid);
+      C.accept[row.uid] = { image_prompt: row.image_prompt !== s.image_prompt, video_prompt: row.video_prompt !== s.video_prompt };
+    }
+    review();
+  };
+
+  const review = () => {
+    const r = C.result;
+    const changed = r.rows.filter((row) => { const s = secById(row.uid); return row.image_prompt !== s.image_prompt || row.video_prompt !== s.video_prompt || row.fold_extra; });
+    const same = r.rows.length - changed.length;
+    dlg.innerHTML = `
+      <div class="dh"><h2>${C.polish ? "Polished prompts" : "Proposed change"}</h2>
+        <p class="muted small" style="margin:4px 0 0">${C.text ? `“${esc(C.text)}” · ` : ""}changed words are highlighted${same ? ` · ${same} section${same > 1 ? "s" : ""} needed no change` : ""}</p></div>
+      <div class="db">
+        ${r.warning ? `<div class="notice nt-check"><b>Heads up.</b> ${esc(r.warning)}</div>` : ""}
+        ${changed.length ? changed.map((row) => {
+          const s = secById(row.uid), a = C.accept[row.uid];
+          const part = (f, label) => row[f] === s[f] ? "" : `<label class="check small"><input type="checkbox" data-ch="${row.uid}" data-f="${f}" ${a[f] ? "checked" : ""}> Use new ${label}${s.edited[f] ? " (replaces your hand edit)" : ""}</label><p>${diff(s[f], row[f])}</p>`;
+          return `<div class="proposal">
+            <div class="ch-head"><b>${tc(s.start)}</b> <span class="muted">${esc(captionText(s.start, s.end) || "Instrumental")}</span>${row.note ? `<span class="ch-note">${esc(row.note)}</span>` : ""}</div>
+            ${part("image_prompt", "image prompt")}${s.static ? "" : part("video_prompt", "motion prompt")}
+            ${row.fold_extra ? `<p class="muted small">Its extra instructions (“${esc(s.extra)}”) are worked into the prompt and cleared when you accept.</p>` : ""}
+          </div>`;
+        }).join("") : `<p class="muted">The model found nothing to change for that request.</p>`}
+      </div>
+      <div class="df"><span class="note">Cost ${money(r.cost || 0)}. Accepting saves the prompts; stills only regenerate if you choose.</span>
+        <button class="btn quiet" id="chBack">Back</button>
+        <button class="btn" id="chAccept">Accept</button>
+        <button class="btn primary" id="chAcceptRegen">Accept and regenerate</button></div>`;
+    $$("[data-ch]", dlg).forEach((c) => (c.onchange = () => { C.accept[c.dataset.ch][c.dataset.f] = c.checked; count(); }));
+    $("#chBack").onclick = compose;
+    $("#chAccept").onclick = () => accept(false);
+    $("#chAcceptRegen").onclick = () => accept(true);
+    const count = () => {
+      const n = picked().length;
+      $("#chAccept").disabled = $("#chAcceptRegen").disabled = !n;
+      $("#chAcceptRegen").textContent = `Accept and regenerate ${n > 1 ? `${n} stills` : "still"}`;
+    };
+    count();
+  };
+
+  const picked = () => C.result.rows.filter((row) => {
+    const a = C.accept[row.uid];
+    return a && (a.image_prompt || a.video_prompt);
+  });
+
+  const accept = async (regen) => {
+    const rows = picked();
+    const note = C.polish ? (C.text ? `Polish: ${C.text}` : "Polish wording") : C.text;
+    dlg.close();
+    const ok = await act(async () => {
+      let st;
+      for (const row of rows) {
+        const a = C.accept[row.uid], body = { ask: note };
+        if (a.image_prompt) body.image_prompt = row.image_prompt;
+        if (a.video_prompt) body.video_prompt = row.video_prompt;
+        if (row.fold_extra && a.image_prompt) body.extra = "";
+        st = await api("PATCH", `songs/${S.slug}/sections/${row.uid}`, body);
+      }
+      if (st) setState(st);
+      S.est = {};
+      S.inspKey = "";
+      renderInspector();
+      return true;
+    });
+    if (!ok) return;
+    const ids = rows.map((row) => row.uid);
+    if (regen) generateStills(ids);
+    else toast(`Updated ${ids.length} section${ids.length > 1 ? "s" : ""}. Nothing was generated.`);
+  };
+
+  compose();
+  dlg.showModal();
+}
+
 function confirmLines(idx) {
   act(async () => {
     let st;
@@ -1118,13 +1248,15 @@ function renderBulk(el, sel) {
     <h3>${sel.length} sections</h3>
     <p class="muted small">${tc(sel[0].start)} – ${tc(sel[sel.length - 1].end)}. Actions apply to this selection only; locked sections are skipped.</p>
     <div class="actions">
-      <button class="btn primary" id="bRegen">Regenerate ${sel.length} stills</button>
+      <button class="btn primary" id="bAsk">Ask for a change…</button>
+      <button class="btn" id="bRegen">Regenerate ${sel.length} stills</button>
       <button class="btn" id="bApprove">Approve selection</button>
       <button class="btn" id="bAnimate">Animate selection…</button>
       <button class="btn" id="bMerge" ${adjacent ? "" : "disabled"}>Merge into one section</button>
     </div>
     <div class="block">${sel.map((s) => `<div class="ref-row"><span class="dot ${s.status}"></span><span class="lbl">${tc(s.start)} ${esc(captionText(s.start, s.end) || "Instrumental")}</span></div>`).join("")}</div>
   </div>`;
+  $("#bAsk").onclick = () => openChange(S.sel);
   $("#bRegen").onclick = () => generateStills(S.sel);
   $("#bApprove").onclick = () => approve(S.sel);
   $("#bAnimate").onclick = () => openAnimate(S.sel);

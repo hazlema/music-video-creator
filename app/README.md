@@ -26,7 +26,7 @@ match to real lyrics, low-confidence lines flagged, caption edges draggable ·
 storyboard in one call with a visual rule and a beat per section; hand-edited fields
 are kept · timeline with waveform cut into sections, zoom/fit, Shift-click ranges,
 play stills/clips with the song · inspector: beat, prompts (Save never generates),
-rewrite-from-beat preview with word diff, extra instructions, global refs with
+rewrite-from-beat preview with word diff, **Ask for a change** (type "the fence should be red" for one section or a selection; the storyboard model merges it into the prompts with the smallest edit, flags conflicts with the visual rule, folds in extra instructions, and you accept the diff; Polish wording is the opt-in freer rewrite; requests are kept per section), extra instructions, global refs with
 per-section switches plus section-only refs, versions, approve, static, lock,
 Failed + Retry · Split into shots overlay, Merge, drag boundaries (only with Lock timing unticked; it is on by default), drag an empty
 stretch to make a gap · cost check before animating, approved non-static only, four

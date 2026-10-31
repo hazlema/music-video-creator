@@ -7,6 +7,7 @@ import json
 import mimetypes
 import re
 import sys
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -358,6 +359,9 @@ def route(method, path, q, body, h):
         tasks.start(song, "export", lambda t: pipeline.export(song, t, use_stale), label="Export")
         return state(song)
 
+    if key == ("POST", "change"):
+        return pipeline.change(song, body.get("uids") or [], body.get("text") or "", bool(body.get("polish")))
+
     if rest[:1] == ["sections"]:
         with song.lock:
             s = song.section(rest[1])
@@ -374,6 +378,8 @@ def route(method, path, q, body, h):
                 for f in ("extra", "static", "locked"):
                     if f in body:
                         s[f] = body[f]
+                if body.get("ask"):
+                    s.setdefault("asks", []).append({"text": body["ask"].strip()[:500], "at": time.time()})
                 if "approved" in body:
                     if body["approved"] and s["still"] is None:
                         raise HttpError(400, "Generate a still before approving.")
@@ -510,8 +516,10 @@ class Handler(BaseHTTPRequestHandler):
         except HttpError as e:
             self._send(e.code, {"error": str(e)})
         except providers.ProviderError as e:
+            print(f"  provider error: {e}", file=sys.stderr)
             self._send(502, {"error": str(e)})
         except (KeyError, ValueError) as e:
+            print(f"  {type(e).__name__}: {e}", file=sys.stderr)
             self._send(400, {"error": str(e).strip("'\"")})
         except Exception as e:
             traceback.print_exc()

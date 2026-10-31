@@ -286,3 +286,12 @@ dialog.busy { width: min(520px, 92vw); }
 }
 
 .timeline.panning, .timeline.panning * { cursor: grabbing !important; }
+
+/* ask for a change */
+.ask-box { width: 100%; font-size: 15px; }
+.ask-wait { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 36px 20px; }
+.ask-wait p { margin: 0; color: var(--muted); }
+.ch-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; font-size: 13px; }
+.ch-head .ch-note { margin-left: auto; color: var(--amber); font-size: 12px; }
+.asks { margin-top: 10px; }
+.asks ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }

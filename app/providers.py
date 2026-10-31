@@ -84,9 +84,12 @@ def chat_json(model, system, user, max_tokens=16000):
         parsed = json.loads(text)
     except json.JSONDecodeError:
         m = re.search(r"\{.*\}", text, re.S)
-        if not m:
+        try:
+            parsed = json.loads(m.group(0)) if m else None
+        except json.JSONDecodeError:
+            parsed = None
+        if not isinstance(parsed, dict):
             raise ProviderError("The storyboard model didn't return JSON.")
-        parsed = json.loads(m.group(0))
     return parsed, (data.get("usage") or {}).get("cost") or 0
 
 

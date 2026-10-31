@@ -355,6 +355,91 @@ def propose(song, sid, write_beat=False):
             "video_prompt": data.get("motion", "").strip()}
 
 
+CHANGE_SYSTEM = """You edit storyboard prompts for a music video at the creator's request.
+You get the creator's brief, the video's visual rule, the shots just outside the selection for continuity, and the shots to edit.
+Each shot has a scene prompt (the still image), a motion prompt (how the still is animated) and sometimes extra instructions.
+
+Apply the creator's request with the smallest edit that carries it out. Keep every other word, detail and phrase unless it contradicts the change; don't polish, reorder or tighten anything else. Fold any extra instructions into the scene or motion the same way, so nothing is left outside the prompts.
+Change the motion prompt only where the request affects it. Static shots have no motion: return their motion unchanged.
+If the request doesn't apply to a shot, return that shot unchanged.
+If the request conflicts with the visual rule or the brief, still apply it to these shots and say so in "warning" (one sentence), so the creator can decide.
+Never put text, words or logos in the shot, and don't repeat the style line.
+Reply with JSON only: {"shots": [{"n": <shot number>, "scene": "...", "motion": "...", "note": "<a few words on what changed, or 'no change'>"}], "warning": ""}"""
+
+POLISH_SYSTEM = """You polish storyboard prompts for a music video.
+You get the creator's brief, the video's visual rule, the shots just outside the selection for continuity, and the shots to polish.
+Each shot has a scene prompt (the still image), a motion prompt (how the still is animated) and sometimes extra instructions.
+
+Rewrite each scene (60-120 words) so an image model renders it well: concrete subjects and setting, appearance, lighting, framing. Rewrite each motion (20-50 words): what moves and how the camera moves. Keep every fact already there: characters, objects, colours, places, actions. Don't add new story. Fold any extra instructions in.
+If the creator adds a request, apply it as well. If it conflicts with the visual rule or the brief, still apply it and say so in "warning" (one sentence).
+Static shots have no motion: return their motion unchanged.
+Never put text, words or logos in the shot, and don't repeat the style line.
+Reply with JSON only: {"shots": [{"n": <shot number>, "scene": "...", "motion": "...", "note": "<a few words on what changed>"}], "warning": ""}"""
+
+MAX_CHANGE = 30
+
+
+def change(song, uids, text, polish=False):
+    """Proposed prompt edits for the given sections from a plain-language request.
+    Saves nothing; the page shows a diff and the creator accepts or not."""
+    text = text.strip()
+    with song.lock:
+        chosen = [s for s in song.plan if s["uid"] in set(uids) and not s["locked"]]
+        if not chosen:
+            raise ValueError("Nothing to change: the selected sections are locked.")
+        if len(chosen) > MAX_CHANGE:
+            raise ValueError(f"Select at most {MAX_CHANGE} sections at a time.")
+        idx = [song.plan.index(s) for s in chosen]
+        before = song.plan[idx[0] - 1] if idx[0] > 0 and song.plan[idx[0] - 1] not in chosen else None
+        after = song.plan[idx[-1] + 1] if idx[-1] + 1 < len(song.plan) and song.plan[idx[-1] + 1] not in chosen else None
+        near = "\n".join(f"{label}: {n['image_prompt']}" for label, n in
+                         (("Shot before the selection", before), ("Shot after the selection", after)) if n)
+        rows = []
+        for k, s in zip(idx, chosen):
+            row = (f"{_section_row(song, k, s)}{' [static: no motion]' if s['static'] else ''}\n"
+                   f"  beat: {s['beat'] or '(none)'}\n  scene: {s['image_prompt']}\n  motion: {s['video_prompt'] or '(none)'}")
+            if s["extra"].strip():
+                row += f"\n  extra instructions: {s['extra'].strip()}"
+            rows.append(row)
+    if polish:
+        ask = f"Polish these shots.{' The creator also asks: ' + text if text else ''}"
+    else:
+        if not text:
+            raise ValueError("Say what you want changed.")
+        ask = f"The creator asks: {text}"
+    user = (f"{_context(song)}\nVISUAL RULE: {song.meta.get('rule') or '(none)'}\n\n{near or '(no neighbouring shots)'}\n\n"
+            f"SHOTS TO EDIT:\n" + "\n\n".join(rows) + f"\n\n{ask}")
+    system = POLISH_SYSTEM if polish else CHANGE_SYSTEM
+    for attempt in (1, 2):   # one retry if the reply doesn't parse
+        try:
+            data, cost = providers.chat_json(song.meta["llm_model"], system, user, max_tokens=1500 + 600 * len(chosen))
+            break
+        except providers.ProviderError as e:
+            if attempt == 2 or "JSON" not in str(e):
+                raise
+    song.add_spend("Polish prompts" if polish else "Prompt change", cost, chosen[0]["uid"] if len(chosen) == 1 else None)
+    shots = [r for r in data.get("shots") or [] if isinstance(r, dict)]
+    got = {}
+    for r in shots:
+        m = re.search(r"\d+", str(r.get("n", "")))
+        if m:
+            got[int(m.group(0))] = r
+    if not any(k in got for k in idx) and len(shots) == len(chosen):
+        got = dict(zip(idx, shots))   # numbered differently, but one per shot in order
+    out = []
+    for k, s in zip(idx, chosen):
+        r = got.get(k)
+        if not r:
+            continue
+        scene = (r.get("scene") or "").strip() or s["image_prompt"]
+        motion = s["video_prompt"] if s["static"] else (r.get("motion") or "").strip() or s["video_prompt"]
+        out.append({"uid": s["uid"], "image_prompt": scene, "video_prompt": motion,
+                    "fold_extra": bool(s["extra"].strip()), "note": (r.get("note") or "").strip()})
+    if not out:
+        raise providers.ProviderError("The storyboard model didn't return any shots. Try again.")
+    return {"rows": out, "warning": (data.get("warning") or "").strip(), "cost": cost}
+
+
 # ==================================================================== stills
 
 def still_refs(song, s):
