@@ -84,11 +84,12 @@ async function openLibrary() {
   <main class="library">
     <h1>Songs into music videos</h1>
     <p class="lede">Each song gets a timeline: timed lyrics, a storyboard, a still for every shot, then a clip for every still you approve.</p>
-    ${list.length ? `<ul class="song-list">${list.map((s) => `
+    ${list.length ? `<ul class="song-grid">${list.map((s) => `
       <li><a href="#/song/${s.slug}">
+        <span class="cover">${s.cover ? `<img src="${`/api/songs/${s.slug}/file/${s.cover}`}" alt="" loading="lazy">` : `<i>No stills yet</i>`}</span>
         <span class="t">${esc(s.title)}</span>
-        <span class="muted">${esc(s.stage)}${s.sections ? ` · ${s.sections} sections` : ""}</span>
-        <span class="muted">${money(s.spent)} spent</span>
+        <span class="muted small">${esc(s.stage)}${s.sections ? ` · ${s.sections} sections` : ""}${s.length ? ` · ${tcShort(s.length)}` : ""}</span>
+        <span class="muted small">${money(s.spent)} spent</span>
       </a></li>`).join("")}</ul>` : `<p class="muted">No songs yet. Start one below.</p>`}
     <form class="new-song" id="newSong">
       <input type="text" name="title" placeholder="Song title" required aria-label="Song title">
@@ -315,15 +316,13 @@ function renderBusy() {
 }
 
 // ================================================================== setup
-const IMAGE_MODELS = ["google/gemini-nano-banana-2.1", "google/gemini-3.1-flash-image", "google/gemini-3-pro-image", "openai/gpt-5.4-image-2", "openai/gpt-5-image-mini"];
-const VIDEO_MODELS = ["x-ai/grok-imagine-video-1.5", "x-ai/grok-imagine-video-1.5-lite", "x-ai/grok-imagine-video", "kwaivgi/kling-v3.0-std", "alibaba/wan-3.0", "bytedance/seedance-2.0-fast", "minimax/hailuo-3-max"];
 
 // Setup fields keep unsaved text in S.setupDraft and save themselves shortly
 // after typing stops, so a redraw (polling, uploads) never loses what was typed.
 const SETUP_FIELDS = {
   fTitle: "title", fLyrics: "lyrics", fBrief: "brief", fStyle: "style",
-  fLlm: "llm_model", fImg: "image_model", fVid: "video_model", fRes: "video_resolution",
 };
+const MODEL_FIELDS = { llm: "llm_model", image: "image_model", video: "video_model" };
 let setupTimer = null;
 
 function setupSaved(field) {
@@ -373,14 +372,7 @@ function renderSetup() {
       <div class="dropzone" id="refDrop" tabindex="0">Drop reference images here, or click to choose</div>
       <input type="file" id="refFile" accept="image/png,image/jpeg,image/webp" multiple hidden>
       <h2 style="margin-top:22px">Models</h2>
-      <div class="models">
-        <label class="field"><span>Storyboard</span><input type="text" id="fLlm" value="${esc(setupVal("llm_model"))}"></label>
-        <label class="field"><span>Stills</span><input type="text" id="fImg" list="imgModels" value="${esc(setupVal("image_model"))}"></label>
-        <label class="field"><span>Video</span><input type="text" id="fVid" list="vidModels" value="${esc(setupVal("video_model"))}"></label>
-        <label class="field"><span>Video resolution</span><select id="fRes">${["480p", "720p", "1080p"].map((r) => `<option ${r === setupVal("video_resolution") ? "selected" : ""}>${r}</option>`).join("")}</select></label>
-      </div>
-      <datalist id="imgModels">${IMAGE_MODELS.map((x) => `<option value="${x}">`).join("")}</datalist>
-      <datalist id="vidModels">${VIDEO_MODELS.map((x) => `<option value="${x}">`).join("")}</datalist>
+      <div class="models" id="models"></div>
       <div class="step"><button class="btn primary" id="btnSaveSetup">Save setup</button><span class="muted small" id="saveNote"></span></div>
     </div>
   </div>`;
@@ -411,6 +403,7 @@ function renderSetup() {
   $$("[data-ref-label]").forEach((i) => (i.onchange = () => act(async () => setState(await api("PATCH", `songs/${S.slug}/refs/${i.dataset.refLabel}`, { label: i.value })))));
   $$("[data-ref-del]").forEach((b) => (b.onclick = () => act(async () => setState(await api("DELETE", `songs/${S.slug}/refs/${b.dataset.refDel}`)))));
   $("#btnSaveSetup").onclick = () => saveSetup().then((ok) => ok && toast("Setup saved."));
+  renderModels();
   if (focus) {
     const t = $("#" + focus.id);
     if (t) { t.focus(); try { t.setSelectionRange(focus.a, focus.b); } catch (_) {} }
@@ -422,6 +415,77 @@ function renderSetup() {
 function noteSave(text) {
   const n = $("#saveNote");
   if (n) n.textContent = text;
+}
+
+// --------------------------------------------------------- model pickers
+// Lists come from OpenRouter (via /api/models) so names and prices are current.
+// "Other model ID…" keeps any model reachable by typing its ID.
+function setupDraftSet(field, value) {
+  S.setupDraft[field] = value;
+  noteSave("Unsaved changes");
+  clearTimeout(setupTimer);
+  setupTimer = setTimeout(saveSetup, 800);
+}
+
+function renderModels() {
+  const el = $("#models");
+  if (!el) return;
+  if (!S.models) {
+    el.innerHTML = `<p class="muted small">Loading the model lists…</p>`;
+    if (!S.modelsLoading) {
+      S.modelsLoading = true;
+      api("GET", "models").then((m) => { S.models = m; }).catch(() => { S.models = { llm: [], image: [], video: [], still_costs: {} }; })
+        .finally(() => { S.modelsLoading = false; renderModels(); });
+    }
+    return;
+  }
+  const M = S.models;
+  const vid = M.video.find((v) => v.id === setupVal("video_model"));
+  const res = setupVal("video_resolution");
+  const perSec = (v, r) => (v?.per_second?.[r] != null ? `$${v.per_second[r].toFixed(3).replace(/0$/, "")}/s` : "");
+  const picker = (kind, label, list, optLabel, hint) => {
+    const field = MODEL_FIELDS[kind], cur = setupVal(field);
+    const known = list.some((o) => o.id === cur);
+    const other = S.modelOther?.[kind] || !known;
+    return `<label class="field model-${kind}"><span>${label}</span>
+      <select data-model="${kind}">
+        ${list.map((o) => `<option value="${esc(o.id)}" ${!other && o.id === cur ? "selected" : ""}>${esc(optLabel(o))}</option>`).join("")}
+        <option value="" ${other ? "selected" : ""}>Other model ID…</option>
+      </select>
+      ${other ? `<input type="text" data-model-id="${kind}" value="${esc(cur)}" placeholder="provider/model-id" aria-label="${label} model ID" style="margin-top:6px">` : ""}
+      <small class="hint">${other ? "Any OpenRouter model ID." : hint}</small></label>`;
+  };
+  const llm = M.llm.find((o) => o.id === setupVal("llm_model"));
+  const cost = M.still_costs?.[setupVal("image_model")];
+  const resList = vid ? vid.resolutions : ["480p", "720p", "1080p"];
+  el.innerHTML = `
+    ${picker("llm", "Storyboard", M.llm, (o) => o.name, llm ? llm.price : "Writes the storyboard and prompt changes.")}
+    ${picker("image", "Stills", M.image, (o) => o.name, cost ? `About $${cost.toFixed(3)} a still on your songs so far.` : "Price shows here after its first still.")}
+    ${picker("video", "Video", M.video, (o) => `${o.name} (from ${perSec(o, o.resolutions.reduce((a, r) => (o.per_second[r] < o.per_second[a] ? r : a)))})`,
+      vid ? `${perSec(vid, res) || "Price unknown"} at ${esc(res)} · clips up to ${vid.max_seconds} s` : "Only models that can animate a still are listed.")}
+    <label class="field"><span>Video resolution</span>
+      <select data-res>${resList.map((r) => `<option value="${r}" ${r === res ? "selected" : ""}>${r}${vid ? ` · ${perSec(vid, r)}` : ""}</option>`).join("")}
+        ${resList.includes(res) ? "" : `<option value="${esc(res)}" selected>${esc(res)} (not offered by this model)</option>`}</select>
+      <small class="hint">Export is 854×480, so 480p is enough unless you'll reuse the clips.</small></label>`;
+
+  $$("[data-model]", el).forEach((sel) => (sel.onchange = () => {
+    const kind = sel.dataset.model;
+    S.modelOther = { ...S.modelOther, [kind]: !sel.value };
+    if (sel.value) {
+      setupDraftSet(MODEL_FIELDS[kind], sel.value);
+      if (kind === "video") {   // keep the resolution one the new model offers
+        const v = M.video.find((x) => x.id === sel.value);
+        if (v && !v.resolutions.includes(setupVal("video_resolution"))) setupDraftSet("video_resolution", v.resolutions[0]);
+      }
+    }
+    renderModels();
+    if (!sel.value) $(`[data-model-id="${kind}"]`)?.focus();
+  }));
+  $$("[data-model-id]", el).forEach((inp) => {
+    inp.oninput = () => setupDraftSet(MODEL_FIELDS[inp.dataset.modelId], inp.value.trim());
+    inp.onblur = () => { if (Object.keys(S.setupDraft).length) { clearTimeout(setupTimer); saveSetup(); } };
+  });
+  $("[data-res]", el).onchange = (e) => { setupDraftSet("video_resolution", e.target.value); renderModels(); };
 }
 
 async function saveSetup() {

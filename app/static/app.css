@@ -67,19 +67,21 @@ textarea:focus, input:focus, select:focus { border-color: var(--wave-dim); outli
 .small { font-size: 12.5px; }
 
 /* ------------------------------------------------------------- library */
-.library { max-width: 760px; margin: 0 auto; padding: 56px 24px; }
+.library { max-width: 1000px; margin: 0 auto; padding: 56px 24px; }
 .library h1 {
   font-size: 44px; line-height: 1.05; font-weight: 750; font-stretch: 112%;
   letter-spacing: -0.02em; margin: 0 0 6px;
 }
 .library p.lede { color: var(--muted); margin: 0 0 36px; max-width: 52ch; }
-.song-list { list-style: none; margin: 0 0 28px; padding: 0; border-top: 1px solid var(--line); }
-.song-list li a {
-  display: grid; grid-template-columns: 1fr auto auto; gap: 24px; align-items: baseline;
-  padding: 14px 4px; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none;
-}
-.song-list li a:hover { background: var(--panel); }
-.song-list .t { font-size: 18px; font-weight: 600; font-stretch: 105%; }
+.song-grid { list-style: none; margin: 0 0 32px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+.song-grid a { display: flex; flex-direction: column; gap: 3px; color: var(--text); text-decoration: none; border-radius: var(--radius-m); padding: 8px; margin: -8px; }
+.song-grid a:hover { background: var(--panel); }
+.song-grid a:focus-visible { outline: 2px solid var(--amber); }
+.song-grid .cover { aspect-ratio: 16 / 9; border-radius: var(--radius-s); overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); display: grid; place-items: center; margin-bottom: 6px; }
+.song-grid .cover img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .25s ease; }
+.song-grid a:hover .cover img { transform: scale(1.03); }
+.song-grid .cover i { color: var(--muted); font-size: 12px; font-style: normal; }
+.song-grid .t { font-size: 17px; font-weight: 600; font-stretch: 105%; line-height: 1.25; }
 .new-song { display: flex; gap: 8px; max-width: 460px; }
 
 /* ---------------------------------------------------------------- shell */
@@ -115,6 +117,9 @@ textarea:focus, input:focus, select:focus { border-color: var(--wave-dim); outli
 .ref-card .x:hover { color: var(--coral); }
 .step { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .models { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.models select { width: 100%; }
+.models .model-video { grid-column: 1 / -1; }
+.models .hint { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 
 /* ------------------------------------------------------------ workspace */
 .work { display: grid; grid-template-columns: minmax(0, 1fr) 400px; min-height: 0; }

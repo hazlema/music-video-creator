@@ -108,6 +108,12 @@ def route(method, path, q, body, h):
         if method == "POST":
             title = (body.get("title") or "").strip() or "Untitled song"
             return {"slug": songs.create(title).slug}
+    if parts == ["models"] and method == "GET":
+        try:
+            catalog = providers.model_catalog()
+        except providers.ProviderError:
+            catalog = {"llm": [], "image": [], "video": []}   # offline: Setup falls back to typing an ID
+        return {**catalog, "still_costs": songs.still_costs()}
     if len(parts) < 2 or parts[0] != "songs":
         raise HttpError(404, "Not found")
     try:

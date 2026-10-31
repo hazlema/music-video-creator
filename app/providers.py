@@ -169,6 +169,47 @@ def clip_limit(model):
     return max(video_durations(model))
 
 
+# Storyboard models worth offering; only those OpenRouter still lists are shown.
+STORYBOARD_MODELS = [
+    "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5", "anthropic/claude-haiku-5.5",
+    "anthropic/claude-fable-5.1", "openai/gpt-5.6-sol", "openai/gpt-5.6-terra",
+    "google/gemini-3.1-pro-preview", "google/gemini-3.8-flash", "x-ai/grok-4.7",
+    "deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-max-0902", "moonshotai/kimi-k3.1-pro",
+]
+
+_catalog = {"at": 0, "data": None}
+
+
+def model_catalog():
+    """Choices for the Setup model pickers, from OpenRouter's live lists (cached 1h)."""
+    if _catalog["data"] and time.time() - _catalog["at"] < 3600:
+        return _catalog["data"]
+    models = {m["id"]: m for m in _request("/models", timeout=60).get("data", [])}
+
+    def per_m(v):
+        return round(float(v or 0) * 1e6, 2)
+
+    llm = [{"id": i, "name": models[i]["name"].split(": ", 1)[-1],
+            "price": f"${per_m(models[i]['pricing'].get('prompt')):g} in · ${per_m(models[i]['pricing'].get('completion')):g} out per M tokens"}
+           for i in STORYBOARD_MODELS if i in models]
+    image = [{"id": m["id"], "name": m["name"].split(": ", 1)[-1]} for m in models.values()
+             if "image" in (m.get("architecture", {}).get("output_modalities") or [])
+             and not m["id"].startswith("openrouter/") and "-preview" not in m["id"]]
+    video = []
+    for m in video_models().values():
+        if "first_frame" not in (m.get("supported_frame_images") or []) or not m.get("supported_durations"):
+            continue
+        res = [r for r in (m.get("supported_resolutions") or []) if video_price(m["id"], r, 1) is not None]
+        if not res:
+            continue
+        video.append({"id": m["id"], "name": m["name"].replace("SpaceXAI: ", ""), "resolutions": res,
+                      "per_second": {r: video_price(m["id"], r, 1) - video_price(m["id"], r, 0) for r in res},
+                      "max_seconds": max(m["supported_durations"])})
+    video.sort(key=lambda v: min(v["per_second"].values()))
+    _catalog.update(at=time.time(), data={"llm": llm, "image": image, "video": video})
+    return _catalog["data"]
+
+
 def video_price(model, resolution, seconds):
     """Estimated USD for one image-to-video clip, from the published price list.
     Returns None when the model is priced in a way we can't estimate."""

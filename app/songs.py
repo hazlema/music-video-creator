@@ -77,6 +77,17 @@ def new_section(start, end, kind="lyric", **kw):
     return s
 
 
+def still_costs():
+    """Average cost of one still per image model, from every song's history."""
+    seen = {}
+    for plan in SONGS.glob("*/plan.json"):
+        for sec in read_json(plan, []) or []:
+            for v in sec.get("stills", []):
+                if v.get("cost") and v.get("model"):
+                    seen.setdefault(v["model"], []).append(v["cost"])
+    return {m: round(sum(c) / len(c), 4) for m, c in seen.items()}
+
+
 class Song:
     def __init__(self, slug):
         self.slug = slug
@@ -156,6 +167,32 @@ class Song:
                 return r
         return None
 
+    def cover(self):
+        """A small JPEG of one of the song's stills for the library, made once
+        per still. Uses the shot nearest a third of the way in: past the intro,
+        usually showing the main characters."""
+        with self.lock:
+            shots = [s for s in self.plan if s.get("still") is not None]
+            if not shots:
+                return None
+            mark = (self.plan[-1]["end"] if self.plan else 0) / 3
+            s = min(shots, key=lambda s: abs((s["start"] + s["end"]) / 2 - mark))
+            v = next((v for v in s["stills"] if v["n"] == s["still"]), None)
+        if not v or not (self.dir / "stills" / v["file"]).exists():
+            return None
+        name = f"cover-{Path(v['file']).stem}.jpg"
+        if not (self.dir / name).exists():
+            try:
+                from PIL import Image
+            except ImportError:
+                return None
+            for old in self.dir.glob("cover-*.jpg"):
+                old.unlink()
+            im = Image.open(self.dir / "stills" / v["file"]).convert("RGB")
+            im.thumbnail((480, 480))
+            im.save(self.dir / name, "JPEG", quality=82)
+        return name
+
     def add_spend(self, what, cost, uid=None):
         if not cost:
             return
@@ -214,5 +251,6 @@ def library():
         if d.is_dir() and (d / "song.json").exists():
             s = get(d.name)
             out.append({"slug": s.slug, "title": s.meta["title"] or s.slug, "stage": s.stage(),
-                        "spent": s.spent(), "sections": len(s.plan), "length": round(s.length, 1)})
+                        "spent": s.spent(), "sections": len(s.plan), "length": round(s.length, 1),
+                        "cover": s.cover()})
     return out
