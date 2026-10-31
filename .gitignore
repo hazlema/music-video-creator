@@ -1,0 +1,17 @@
+.env
+__pycache__/
+spike/out.json
+songs/
+.playwright-mcp/
+
+# Generated media: audio, stills, clips, renders. Text files in media/ are kept.
+media/*.wav
+media/*.mp4
+media/*.png
+media/*.blend
+media/*.blend1
+media/clean/
+media/clips/
+media/raw/
+media/stills/
+spike/test/

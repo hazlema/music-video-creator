@@ -1,0 +1,296 @@
+[
+  {
+    "i": 0,
+    "text": "Saw it on my feed this morning",
+    "start": 14.86,
+    "end": 18.22,
+    "matched": "5/7"
+  },
+  {
+    "i": 1,
+    "text": "Wedged between the ads and the rain",
+    "start": 18.22,
+    "end": 21.76,
+    "matched": "7/7"
+  },
+  {
+    "i": 2,
+    "text": "Kid went over the rail at the zoo",
+    "start": 22.02,
+    "end": 24.8,
+    "matched": "8/8"
+  },
+  {
+    "i": 3,
+    "text": "Like the warning signs were part of the game",
+    "start": 24.8,
+    "end": 28.16,
+    "matched": "9/9"
+  },
+  {
+    "i": 4,
+    "text": "Sixteen feet of chain-link fence",
+    "start": 29.12,
+    "end": 32.32,
+    "matched": "5/5"
+  },
+  {
+    "i": 5,
+    "text": "Painted red, impossible to miss",
+    "start": 32.32,
+    "end": 35.52,
+    "matched": "5/5"
+  },
+  {
+    "i": 6,
+    "text": "And a thousand comments asking why",
+    "start": 35.52,
+    "end": 38.96,
+    "matched": "6/6"
+  },
+  {
+    "i": 7,
+    "text": "Like none of them ever wanted this",
+    "start": 38.96,
+    "end": 42.4,
+    "matched": "7/7"
+  },
+  {
+    "i": 8,
+    "text": "But I know that pull —",
+    "start": 42.4,
+    "end": 45.54,
+    "matched": "4/5"
+  },
+  {
+    "i": 9,
+    "text": "The gorgeous and the terrible",
+    "start": 45.76,
+    "end": 49.41,
+    "matched": "5/5"
+  },
+  {
+    "i": 10,
+    "text": "The thing behind the glass",
+    "start": 49.41,
+    "end": 52.59,
+    "matched": "5/5"
+  },
+  {
+    "i": 11,
+    "text": "That calls you by your name",
+    "start": 52.59,
+    "end": 56.0,
+    "matched": "6/6"
+  },
+  {
+    "i": 12,
+    "text": "Everybody’s got a tiger",
+    "start": 56.0,
+    "end": 58.55,
+    "matched": "4/4"
+  },
+  {
+    "i": 13,
+    "text": "Something beautiful that bites",
+    "start": 58.55,
+    "end": 61.84,
+    "matched": "4/4"
+  },
+  {
+    "i": 14,
+    "text": "Everybody’s got a railing",
+    "start": 62.97,
+    "end": 65.89,
+    "matched": "4/4"
+  },
+  {
+    "i": 15,
+    "text": "And a reason, and a night",
+    "start": 65.89,
+    "end": 68.8,
+    "matched": "6/6"
+  },
+  {
+    "i": 16,
+    "text": "And I keep climbing, keep on climbing",
+    "start": 70.48,
+    "end": 74.09,
+    "matched": "7/7"
+  },
+  {
+    "i": 17,
+    "text": "Like the fence was never there",
+    "start": 74.09,
+    "end": 77.05,
+    "matched": "6/6"
+  },
+  {
+    "i": 18,
+    "text": "Don’t you tell me you can’t hear it",
+    "start": 77.75,
+    "end": 82.16,
+    "matched": "8/8"
+  },
+  {
+    "i": 19,
+    "text": "Purring somewhere",
+    "start": 83.96,
+    "end": 85.84,
+    "matched": "2/2"
+  },
+  {
+    "i": 20,
+    "text": "Not two weeks later I caught myself",
+    "start": 99.59,
+    "end": 102.93,
+    "matched": "7/7"
+  },
+  {
+    "i": 21,
+    "text": "One leg over a rail of my own",
+    "start": 102.93,
+    "end": 105.73,
+    "matched": "8/8"
+  },
+  {
+    "i": 22,
+    "text": "Staring down at something hungry",
+    "start": 106.93,
+    "end": 110.08,
+    "matched": "5/5"
+  },
+  {
+    "i": 23,
+    "text": "Wearing my face, picking at a bone",
+    "start": 110.08,
+    "end": 113.52,
+    "matched": "7/7"
+  },
+  {
+    "i": 24,
+    "text": "And the safe-side crowd’s still talking",
+    "start": 113.6,
+    "end": 117.08,
+    "matched": "5/6"
+  },
+  {
+    "i": 25,
+    "text": "Tickets in hand, so sure, so loud",
+    "start": 117.08,
+    "end": 120.29,
+    "matched": "7/7"
+  },
+  {
+    "i": 26,
+    "text": "Swearing up and down they’d never —",
+    "start": 120.29,
+    "end": 123.4,
+    "matched": "6/6"
+  },
+  {
+    "i": 27,
+    "text": "From the dry side of the moat, real proud",
+    "start": 123.4,
+    "end": 127.27,
+    "matched": "9/9"
+  },
+  {
+    "i": 28,
+    "text": "Everybody’s got a tiger",
+    "start": 127.27,
+    "end": 129.52,
+    "matched": "4/4"
+  },
+  {
+    "i": 29,
+    "text": "Something beautiful that bites",
+    "start": 130.72,
+    "end": 132.96,
+    "matched": "4/4"
+  },
+  {
+    "i": 30,
+    "text": "Everybody’s got a railing",
+    "start": 134.32,
+    "end": 137.12,
+    "matched": "4/4"
+  },
+  {
+    "i": 31,
+    "text": "And a reason, and a night",
+    "start": 137.12,
+    "end": 139.92,
+    "matched": "6/6"
+  },
+  {
+    "i": 32,
+    "text": "And I keep climbing, keep on climbing",
+    "start": 141.6,
+    "end": 145.19,
+    "matched": "7/7"
+  },
+  {
+    "i": 33,
+    "text": "Like the fence was never there",
+    "start": 145.19,
+    "end": 148.14,
+    "matched": "6/6"
+  },
+  {
+    "i": 34,
+    "text": "Don’t you tell me you can’t hear it",
+    "start": 148.88,
+    "end": 153.13,
+    "matched": "8/8"
+  },
+  {
+    "i": 35,
+    "text": "Purring somewhere",
+    "start": 155.09,
+    "end": 156.96,
+    "matched": "2/2"
+  },
+  {
+    "i": 36,
+    "text": "They put the tiger down that evening",
+    "start": 170.4,
+    "end": 173.94,
+    "matched": "6/7"
+  },
+  {
+    "i": 37,
+    "text": "Standard procedure, so they said",
+    "start": 173.94,
+    "end": 177.28,
+    "matched": "5/5"
+  },
+  {
+    "i": 38,
+    "text": "Something wild did something wild",
+    "start": 177.44,
+    "end": 182.08,
+    "matched": "4/5"
+  },
+  {
+    "i": 39,
+    "text": "So something wild ends up dead",
+    "start": 182.08,
+    "end": 185.37,
+    "matched": "2/6"
+  },
+  {
+    "i": 40,
+    "text": "It was never the tiger’s idea",
+    "start": 185.46,
+    "end": 189.23,
+    "matched": "6/6"
+  },
+  {
+    "i": 41,
+    "text": "To build a cage in town...",
+    "start": 189.23,
+    "end": 192.36,
+    "matched": "6/6"
+  }
+]
