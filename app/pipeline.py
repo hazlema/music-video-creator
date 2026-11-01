@@ -487,6 +487,35 @@ def change(song, uids, text, polish=False):
 
 # ==================================================================== stills
 
+LAST_LABEL = "the previous shot's last frame"
+CONTINUE_NOTE = (f"This shot continues straight on from the reference image of {LAST_LABEL}: "
+                 "the same place, characters, clothes, light and colours, a moment later. ")
+
+
+def last_frame(song, s):
+    """For "Continue from last clip": the final frame the viewer sees of the
+    section before s (its clip trimmed to the section, as export does), saved as
+    refs/last-<uid>.png. Returns (path, where it came from)."""
+    prev, _ = song.neighbours(s)
+    if not prev:
+        raise ValueError("Continue from last clip is on, but this is the first section.")
+    if prev["static"]:   # a static section is its still for its whole length
+        if prev["still"] is None:
+            raise ValueError("Continue from last clip is on, but the previous section has no still yet.")
+        v = next(v for v in prev["stills"] if v["n"] == prev["still"])
+        return song.dir / "stills" / v["file"], {"uid": prev["uid"], "still": prev["still"]}
+    c = _clip(prev, prev["clip"]) if prev["clip"] is not None else None
+    if not c:
+        raise ValueError("Continue from last clip is on, but the previous section has no clip yet. Animate it first.")
+    out = song.dir / "refs" / f"last-{s['uid']}.png"
+    out.parent.mkdir(exist_ok=True)
+    # Read only as much of the clip as the section shows; -update keeps
+    # overwriting the image, so what's left is the last frame shown.
+    subprocess.run([ffmpeg(), "-y", "-loglevel", "error", "-t", f"{section_length(prev):.3f}",
+                    "-i", str(song.dir / "raw" / c["file"]), "-an", "-update", "1", str(out)], check=True)
+    return out, {"uid": prev["uid"], "clip": c["n"]}
+
+
 def still_refs(song, s):
     out = []
     for r in song.meta["refs"]:
@@ -498,7 +527,7 @@ def still_refs(song, s):
 
 
 def still_prompt(song, s):
-    parts = [s["image_prompt"].strip()]
+    parts = [(CONTINUE_NOTE if s.get("continue_last") else "") + s["image_prompt"].strip()]
     if s["extra"].strip():
         parts.append(s["extra"].strip())
     if song.meta["style"].strip():
@@ -509,20 +538,30 @@ def still_prompt(song, s):
 _still_slots = threading.Semaphore(4)
 
 
-def make_still(song, sid, task, model=None):
-    """model overrides the song's Stills model for this one still ("Regenerate with")."""
+def make_still(song, sid, task, model=None, quality=None):
+    """model (and quality) override the song's Stills model for this one still
+    ("Regenerate with")."""
     with song.lock:
         s = song.section(sid)
         if not s["image_prompt"].strip():
             raise ValueError("This section has no image prompt yet. Run the storyboard or write one.")
         prompt = still_prompt(song, s)
         refs = still_refs(song, s)
-        model = model or song.meta["image_model"]
+        after = None
+        if s.get("continue_last"):
+            frame, after = last_frame(song, s)
+            refs.insert(0, (LAST_LABEL, frame))
+        if model:
+            quality = quality or ""
+        else:
+            model, quality = song.meta["image_model"], song.meta.get("image_quality") or ""
+    if quality and quality not in providers.image_qualities(model):
+        quality = ""   # e.g. the song's quality was for another model
     task["msg"] = "Waiting for a slot"
     with _still_slots:
-        task["msg"] = f"Generating with {model}"
+        task["msg"] = f"Generating with {model}" + (f" ({quality} quality)" if quality else "")
         try:
-            img, ext, cost = providers.still_provider(model).generate(prompt, refs)
+            img, ext, cost = providers.still_provider(model, quality).generate(prompt, refs)
         except Exception as e:
             with song.lock:
                 song.section(sid)["failed"] = {"what": "still", "reason": str(e)}
@@ -535,7 +574,7 @@ def make_still(song, sid, task, model=None):
         name = f"{sid}-v{n}.{ext}"
         (song.dir / "stills" / name).write_bytes(img)
         s["stills"].append({"n": n, "file": name, "prompt": prompt, "model": model, "cost": cost,
-                            "at": time.time()})
+                            "at": time.time(), **({"after": after} if after else {}), **({"quality": quality} if quality else {})})
         select_still(s, n)
         song.save_plan()
 

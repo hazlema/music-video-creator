@@ -517,14 +517,19 @@ function renderModels() {
   const llm = M.llm.find((o) => o.id === setupVal("llm_model"));
   const cost = M.still_costs?.[setupVal("image_model")];
   const imgLocal = setupVal("image_model").startsWith("local/");
+  const img = M.image.find((o) => o.id === setupVal("image_model"));
+  const qual = setupVal("image_quality") || "";
   const resList = vid ? vid.resolutions : ["480p", "720p", "1080p"];
   el.innerHTML = `
     ${picker("transcribe", "Transcription", M.transcribe || [], (o) => o.name,
       (M.transcribe || []).find((o) => o.id === setupVal("transcribe_model"))?.note || "Times the lyrics. Change it before transcribing.")}
     ${picker("llm", "Storyboard", M.llm, (o) => o.name, llm ? llm.price : "Writes the storyboard and prompt changes.")}
-    ${picker("image", "Stills", M.image, (o) => o.name, imgLocal
+    ${picker("image", "Stills", M.image, (o) => o.name + qualityTag(o), imgLocal
       ? (M.sidecar ? `Free · the local model is running (${esc(M.sidecar.mode)} mode).` : `<b class="warn">The local model isn't running.</b> ${esc(M.sidecar_help)}`)
       : cost ? `About $${cost.toFixed(3)} a still on your songs so far.` : "Price shows here after its first still.")}
+    ${img?.qualities?.length ? `<label class="field"><span>Still quality</span>
+      <select data-quality>${["", ...img.qualities].map((q) => `<option value="${q}" ${q === qual ? "selected" : ""}>${qualityLabel(img.id, q)}</option>`).join("")}</select>
+      <small class="hint">Lower quality is much cheaper. The model's default is usually its best and priciest. Regenerate with… can use another quality for single shots.</small></label>` : ""}
     ${picker("video", "Video", M.video, (o) => `${o.name} (from ${perSec(o, o.resolutions.reduce((a, r) => (o.per_second[r] < o.per_second[a] ? r : a)))})`,
       vid ? `${perSec(vid, res) || "Price unknown"} at ${esc(res)} · clips up to ${vid.max_seconds} s` : "Only models that can animate a still are listed.")}
     <label class="field"><span>Video resolution</span>
@@ -537,6 +542,10 @@ function renderModels() {
     S.modelOther = { ...S.modelOther, [kind]: !sel.value };
     if (sel.value) {
       setupDraftSet(MODEL_FIELDS[kind], sel.value);
+      if (kind === "image") {   // drop a quality the new model doesn't offer
+        const o = M.image.find((x) => x.id === sel.value);
+        if (setupVal("image_quality") && !o?.qualities?.includes(setupVal("image_quality"))) setupDraftSet("image_quality", "");
+      }
       if (kind === "video") {   // keep the resolution one the new model offers
         const v = M.video.find((x) => x.id === sel.value);
         if (v && !v.resolutions.includes(setupVal("video_resolution"))) setupDraftSet("video_resolution", v.resolutions[0]);
@@ -553,6 +562,20 @@ function renderModels() {
     inp.onblur = () => { if (Object.keys(S.setupDraft).length) { clearTimeout(setupTimer); saveSetup(); } };
   });
   $("[data-res]", el).onchange = (e) => { setupDraftSet("video_resolution", e.target.value); renderModels(); };
+  const qs = $("[data-quality]", el);
+  if (qs) qs.onchange = (e) => { setupDraftSet("image_quality", e.target.value); renderModels(); };
+}
+
+// " (high, med, low)" after a model's name when it offers quality levels.
+function qualityTag(o) {
+  return o.qualities?.length ? ` (${[...o.qualities].reverse().map((q) => (q === "medium" ? "med" : q)).join(", ")})` : "";
+}
+
+// "Medium · about $0.050 a still" for the quality pickers; "" is the model's default.
+function qualityLabel(model, q) {
+  const c = S.models?.still_costs?.[q ? `${model}@${q}` : model];
+  const name = q ? q[0].toUpperCase() + q.slice(1) : "Model default";
+  return c != null ? `${name} · about ${money(c)} a still` : name;
 }
 
 async function saveSetup() {
@@ -967,10 +990,10 @@ async function approve(uids, approved = true) {
   });
 }
 
-async function generateStills(uids, model) {
+async function generateStills(uids, model, quality) {
   return act(async () => {
     const since = Date.now() / 1000 - 2;
-    const r = await api("POST", `songs/${S.slug}/stills`, model ? { uids, model } : { uids });
+    const r = await api("POST", `songs/${S.slug}/stills`, model ? { uids, model, quality } : { uids });
     setState(r);
     if (r.started > 1) openBusy("still", since, r.started);
     if (r.skipped.length) toast(`Skipped: ${r.skipped.join("; ")}`, true);
@@ -1008,16 +1031,25 @@ async function openRegenWith(uids) {
       <p class="muted small" style="margin:4px 0 0">Same prompt and references, another image model. The song's Stills model stays ${esc(list.find((o) => o.id === songModel)?.name || songModel)}; the new version is added alongside the others.</p></div>
     <div class="db"><div class="regen-list">${list.map((o) => `
       <label class="regen-row"><input type="radio" name="rw" value="${esc(o.id)}" ${o.id === pick ? "checked" : ""}>
-        <span class="nm">${esc(o.name)}${o.id === songModel ? ` <span class="muted small">(song's model)</span>` : ""}</span>
-        <span class="muted small">${price(o)}</span></label>`).join("")}</div></div>
+        <span class="nm">${esc(o.name)}${o.qualities?.length ? ` <span class="muted small">${esc(qualityTag(o).trim())}</span>` : ""}${o.id === songModel ? ` <span class="muted small">(song's model)</span>` : ""}</span>
+        <span class="muted small">${price(o)}</span></label>`).join("")}</div>
+      <label class="field" id="rwQualityField" style="margin-top:12px"><span>Quality</span><select id="rwQuality"></select></label></div>
     <div class="df"><button class="btn quiet" id="rwCancel">Cancel</button><button class="btn primary" id="rwGo"></button></div>`;
+  // The quality you picked is kept while you look at other models; one that
+  // doesn't offer it uses its default.
+  let quality = S.regenQuality ?? "";
+  const qualityFor = (id) => ((list.find((x) => x.id === id)?.qualities || []).includes(quality) ? quality : "");
   const label = () => {
     const o = list.find((x) => x.id === pick);
-    $("#rwGo").textContent = `Generate ${n > 1 ? `${n} stills` : "still"} with ${o?.name || pick}`;
+    const qs = o?.qualities || [], q = qualityFor(pick);
+    $("#rwQualityField").hidden = !qs.length;
+    $("#rwQuality").innerHTML = ["", ...qs].map((v) => `<option value="${v}" ${v === q ? "selected" : ""}>${qualityLabel(pick, v)}</option>`).join("");
+    $("#rwGo").textContent = `Generate ${n > 1 ? `${n} stills` : "still"} with ${o?.name || pick}${q ? ` (${q})` : ""}`;
   };
   $$("[name=rw]", dlg).forEach((r) => (r.onchange = () => { pick = r.value; label(); }));
+  $("#rwQuality").onchange = (e) => { quality = e.target.value; label(); };
   $("#rwCancel").onclick = () => dlg.close();
-  $("#rwGo").onclick = () => { dlg.close(); S.regenModel = pick; generateStills(uids, pick); };
+  $("#rwGo").onclick = () => { dlg.close(); S.regenModel = pick; S.regenQuality = quality; generateStills(uids, pick, qualityFor(pick)); };
   label();
   dlg.showModal();
 }
@@ -1054,6 +1086,9 @@ function renderInspector() {
   const busy = running("still", s.uid);
   const lyric = captionText(s.start, s.end);
   const lock = s.locked ? "disabled" : "";
+  // "Continue from last clip": the still is made from the previous section's last frame.
+  const prev = plan()[plan().indexOf(s) - 1];
+  const prevReady = prev && (prev.static ? prev.still !== null : prev.clip !== null);
   const est = S.est[s.uid];
   const clipReady = est && est.status === "ready";
 
@@ -1076,6 +1111,9 @@ function renderInspector() {
       <button class="btn" id="iRegenWith" ${busy || s.locked ? "disabled" : ""}>${s.stills.length ? "Regenerate" : "Generate"} with…</button>
       ${dirty ? `<span class="muted small" style="align-self:center">Uses the saved prompt. Save first to use your edits.</span>` : ""}
     </div>
+    <label class="check small continue" title="New stills for this section are made from the last frame of the previous section's clip, so the shot carries on from it. The previous clip has to exist first.">
+      <input type="checkbox" id="iContinue" ${s.continue_last ? "checked" : ""} ${prev && !s.locked ? "" : "disabled"}> Continue from last clip</label>
+    ${s.continue_last && !prevReady ? `<span class="muted small">${prev?.static ? "Generate the previous section's still first." : "Animate the previous section first."}</span>` : ""}
   </div>
 
   ${s.static ? "" : `<div class="block">
@@ -1241,6 +1279,7 @@ function bindInspector(s) {
   }));
   $$("[data-confirm-lines]", el).forEach((b) => (b.onclick = () => confirmLines(b.dataset.confirmLines.split(",").map(Number))));
   $("#iApproved").onchange = (e) => approve([id], e.target.checked);
+  $("#iContinue").onchange = (e) => patchSection(id, { continue_last: e.target.checked });
   $("#iRegenWith").onclick = () => (s.image_prompt.trim() ? openRegenWith([id]) : $("#iRegen").click());
   $("#iRegen").onclick = () => {
     if (!s.image_prompt.trim()) return toast(plan().some((x) => x.image_prompt)

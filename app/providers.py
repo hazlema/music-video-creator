@@ -136,6 +136,53 @@ class OpenRouterStills(StillProvider):
         return base64.b64decode(b64), ext, (data.get("usage") or {}).get("cost") or 0
 
 
+class OpenRouterImages(StillProvider):
+    """OpenRouter's Images API. Used when a quality is chosen: the chat route
+    above can't ask for one, and OpenAI's models default to their priciest."""
+
+    def __init__(self, model, quality):
+        self.model, self.quality = model, quality
+
+    def generate(self, prompt, refs):
+        if refs:
+            names = ", ".join(f"image {n + 1}: {label}" for n, (label, _) in enumerate(refs))
+            prompt = (f"Reference images ({names}). Keep these characters, places and props "
+                      f"looking exactly like their references.\n\n{prompt}")
+        data = _request("/images", {
+            "model": self.model, "prompt": prompt, "n": 1,
+            "aspect_ratio": "16:9", "quality": self.quality,
+            "input_references": [{"type": "image_url", "image_url": {"url": data_url(path)}} for _, path in refs],
+        }, timeout=300)
+        images = data.get("data") or []
+        if not images or not images[0].get("b64_json"):
+            raise ProviderError(f"No image: {json.dumps(data)[:300]}")
+        ext = "png" if "png" in (images[0].get("media_type") or "png") else "jpg"
+        return base64.b64decode(images[0]["b64_json"]), ext, (data.get("usage") or {}).get("cost") or 0
+
+
+_image_models = {"at": 0, "data": {}}
+
+
+def image_models():
+    """Models on OpenRouter's Images API, by id (cached 1h)."""
+    if not _image_models["data"] or time.time() - _image_models["at"] > 3600:
+        data = _request("/images/models", timeout=60).get("data", [])
+        _image_models.update(at=time.time(), data={m["id"]: m for m in data})
+    return _image_models["data"]
+
+
+def image_qualities(model):
+    """The quality levels a model offers through the Images API, lowest first
+    ([] when it has none, or the list can't be fetched)."""
+    if model.startswith("local/"):
+        return []
+    try:
+        q = ((image_models().get(model) or {}).get("supported_parameters") or {}).get("quality") or {}
+    except ProviderError:
+        return []
+    return [v for v in q.get("values") or [] if v != "auto"]
+
+
 # ------------------------------------------------------------ local stills
 
 SIDECAR = os.environ.get("MV_SIDECAR", "http://127.0.0.1:8790")
@@ -178,10 +225,16 @@ class LocalStills(StillProvider):
         return base64.b64decode(data["image"]), "png", 0
 
 
-def still_provider(model):
+def still_provider(model, quality=""):
     if model.startswith("local/"):
         return LocalStills(model)
-    return OpenRouterStills(model)
+    if quality and quality in image_qualities(model):
+        return OpenRouterImages(model, quality)
+    try:
+        images_only = any(o["id"] == model and o.get("images_only") for o in model_catalog()["image"])
+    except ProviderError:
+        images_only = False
+    return OpenRouterImages(model, "auto") if images_only else OpenRouterStills(model)
 
 
 # --------------------------------------------------------------------- video
@@ -250,6 +303,18 @@ def model_catalog():
              # image-only models (FLUX, Seedream...) need a different request; not wired up yet
              if {"image", "text"} <= set(m.get("architecture", {}).get("output_modalities") or [])
              and not m["id"].startswith("openrouter/") and "-preview" not in m["id"]]
+    # Images API models with a quality setting (GPT Image, Grok Imagine), even
+    # image-only ones the chat route can't use: they always go through it.
+    try:
+        for m in image_models().values():
+            sp = m.get("supported_parameters") or {}
+            if ("quality" in sp and "16:9" in ((sp.get("aspect_ratio") or {}).get("values") or [])
+                    and "-preview" not in m["id"] and not any(o["id"] == m["id"] for o in image)):
+                image.append({"id": m["id"], "name": m["name"].split(": ", 1)[-1], "images_only": True})
+    except ProviderError:
+        pass
+    for o in image:
+        o["qualities"] = image_qualities(o["id"])
     video = []
     for m in video_models().values():
         if "first_frame" not in (m.get("supported_frame_images") or []) or not m.get("supported_durations"):

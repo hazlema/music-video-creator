@@ -63,6 +63,7 @@ textarea { resize: vertical; min-height: 64px; line-height: 1.5; }
 textarea:focus, input:focus, select:focus { border-color: var(--wave-dim); outline: none; }
 .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .check input { accent-color: var(--amber); }
+.check.continue { margin-top: 10px; }
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 

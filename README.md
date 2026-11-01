@@ -15,8 +15,9 @@ Blender's path set in **Settings**; see [Setup](#setup)).
 Models run through [OpenRouter](https://openrouter.ai): transcription
 (ElevenLabs Scribe v2, which times every word), the storyboard, stills and
 video. Stills can also run free on your own GPU with FLUX.2 Klein (see
-[Local stills](#local-stills-optional-free)). A whole song in API stills costs
-about $1. Clips are priced per second: new songs default to Grok Imagine Video
+[Local stills](#local-stills-optional-free)). New songs make stills with GPT
+Image 2.5 Sunburst at medium quality, about 2¢ a still, so a whole song costs
+under $1. Clips are priced per second: new songs default to Grok Imagine Video
 1.5 Lite at $0.02/s (480p), about $4 for a 40-shot song; full Grok 1.5 is
 $0.08/s, and any OpenRouter video model can be picked per song.
 

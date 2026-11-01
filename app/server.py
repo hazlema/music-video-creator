@@ -177,7 +177,7 @@ def route(method, path, q, body, h):
 
     if key == ("PUT", "setup"):
         with song.lock:
-            for f in ("title", "style", "transcribe_model", "llm_model", "image_model", "video_model", "video_resolution"):
+            for f in ("title", "style", "transcribe_model", "llm_model", "image_model", "image_quality", "video_model", "video_resolution"):
                 if f in body:
                     song.meta[f] = body[f].strip()
             if "timing_locked" in body:
@@ -279,6 +279,7 @@ def route(method, path, q, body, h):
         with song.lock:
             wanted = body.get("uids") or [s["uid"] for s in song.plan if s["still"] is None]
             model = (body.get("model") or "").strip() or None   # "Regenerate with": just these stills
+            quality = body.get("quality") if model else None
             chosen, skipped = [], []
             for sid in wanted:
                 s = song.section(sid)
@@ -291,7 +292,7 @@ def route(method, path, q, body, h):
                 else:
                     chosen.append(sid)
         for sid in chosen:
-            tasks.start(song, "still", lambda t, sid=sid: pipeline.make_still(song, sid, t, model), uid=sid, label="Still")
+            tasks.start(song, "still", lambda t, sid=sid: pipeline.make_still(song, sid, t, model, quality), uid=sid, label="Still")
         return {**state(song), "started": len(chosen), "skipped": skipped}
 
     if key == ("POST", "split"):
@@ -431,7 +432,7 @@ def route(method, path, q, body, h):
                     if f in body and body[f] != s[f]:
                         s[f] = body[f]
                         s["edited"][f] = bool(body.get("hand", True))
-                for f in ("extra", "static", "locked"):
+                for f in ("extra", "static", "locked", "continue_last"):
                     if f in body:
                         s[f] = body[f]
                 if body.get("ask"):

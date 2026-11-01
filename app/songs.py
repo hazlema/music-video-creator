@@ -30,7 +30,8 @@ DEFAULTS = {
     "refs": [],
     "transcribe_model": "elevenlabs/scribe-v2",
     "llm_model": "anthropic/claude-sonnet-5.5",
-    "image_model": "google/gemini-nano-banana-2.1",
+    "image_model": "openai/gpt-image-2.5-sunburst",   # about 2¢ a still at medium
+    "image_quality": "medium",   # "" is the model's own default; low/medium/high where the model offers them
     "video_model": "x-ai/grok-imagine-video-1.5-lite",   # $0.02/s at 480p; full 1.5 is $0.08/s
     "video_resolution": "480p",
     "timing_locked": True,   # section edges can't be dragged until unticked
@@ -86,6 +87,8 @@ def still_costs():
             for v in sec.get("stills", []):
                 if v.get("cost") and v.get("model"):
                     seen.setdefault(v["model"], []).append(v["cost"])
+                    if v.get("quality"):   # also per quality, as "model@medium"
+                        seen.setdefault(f"{v['model']}@{v['quality']}", []).append(v["cost"])
     return {m: round(sum(c) / len(c), 4) for m, c in seen.items()}
 
 
