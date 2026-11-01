@@ -307,3 +307,12 @@ dialog.busy { width: min(520px, 92vw); }
 .regen-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 7px 8px; border-radius: var(--radius-s); cursor: pointer; }
 .regen-row:hover { background: var(--panel-2); }
 .regen-row:has(input:checked) { background: var(--panel-2); outline: 1px solid var(--wave-dim); }
+
+/* settings */
+.library .settings-link { float: right; }
+.settings h2 { font-size: 18px; margin: 0 0 8px; }
+.settings .block { max-width: 720px; margin-top: 18px; }
+.settings .found { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 8px; }
+.settings .found code { color: var(--muted); margin-left: 6px; }
+.settings .good b { color: var(--sage); }
+.settings .bad b { color: var(--coral); }

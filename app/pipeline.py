@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 import providers
+import settings
 from providers import ProviderError
 from songs import ROOT, new_section, read_json, timecode, uid, write_json
 
@@ -30,7 +31,6 @@ MIN_SHOT = 1.0       # shorter shots are folded into a neighbour
 MARKER = re.compile(r"^\s*[\[{](.*?)[\]}]\s*$")   # [Chorus], {Bridge}: structure, not sung
 CLIP_WORKERS = 4
 W, H, FPS = 854, 480, 24
-BLENDER = Path("/opt/blender-5.1.2-linux-x64/blender")
 NO_TEXT = " No text, no words, no lettering anywhere in the image."
 
 
@@ -898,13 +898,18 @@ def export(song, task, use_stale=()):
     from PIL import Image
     Image.new("RGB", (W, H), "black").save(out / "gap.png")
 
-    if BLENDER.exists():
-        task["msg"] = "Writing music_video.blend"
-        task["progress"] = round((len(pieces) + 1) / (len(pieces) + 2), 3)
-        r = subprocess.run([str(BLENDER), "-b", "--factory-startup", "--python", str(ROOT / "mv" / "blend.py"),
-                            "--", str(out), str(out / "gap.png")], capture_output=True, text=True)
-        if r.returncode != 0 or not (out / "music_video.blend").exists():
-            task["msg"] = "Video done; the .blend failed: " + (r.stderr or r.stdout)[-300:]
-            return
     fallbacks = sum(1 for r in rows.values() if r["use"] != "clip")
-    task["msg"] = f"Exported. {fallbacks} sections used stills."
+    done = f"Exported. {fallbacks} sections used stills."
+    blender, wanted = settings.blender(), settings.get()["blender"].strip()
+    if not blender:   # optional: the MP4 and lyrics.srt are already written
+        task["msg"] = done + (f" No .blend: Blender isn't at {wanted} any more (see Settings)." if wanted
+                              else " No .blend: set Blender in Settings to get one.")
+        return
+    task["msg"] = "Writing music_video.blend"
+    task["progress"] = round((len(pieces) + 1) / (len(pieces) + 2), 3)
+    r = subprocess.run([blender, "-b", "--factory-startup", "--python", str(ROOT / "mv" / "blend.py"),
+                        "--", str(out), str(out / "gap.png")], capture_output=True, text=True)
+    if r.returncode != 0 or not (out / "music_video.blend").exists():
+        task["msg"] = "Video done; the .blend failed: " + (r.stderr or r.stdout)[-300:]
+        return
+    task["msg"] = done

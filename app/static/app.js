@@ -71,6 +71,7 @@ function route() {
   if (S.view === "song" && Object.keys(S.setupDraft).length) saveSetup();
   const m = location.hash.match(/^#\/song\/([a-z0-9-]+)(?:\/(setup|timeline))?/);
   if (m) openSong(m[1], m[2]);
+  else if (location.hash === "#/settings") openSettings();
   else openLibrary();
 }
 window.addEventListener("hashchange", route);
@@ -82,6 +83,7 @@ async function openLibrary() {
   const list = await act(() => api("GET", "songs")) || [];
   $("#app").innerHTML = `
   <main class="library">
+    <a class="btn quiet settings-link" href="#/settings">Settings</a>
     <h1>Songs into music videos</h1>
     <p class="lede">Each song gets a timeline: timed lyrics, a storyboard, a still for every shot, then a clip for every still you approve.</p>
     ${list.length ? `<ul class="song-grid">${list.map((s) => `
@@ -103,6 +105,57 @@ async function openLibrary() {
       location.hash = `#/song/${r.slug}/setup`;
     });
   };
+}
+
+// =============================================================== settings
+// App-wide, not per song. For now: where Blender is, for music_video.blend.
+async function openSettings() {
+  S.view = "settings";
+  audio.pause();
+  const cfg = await act(() => api("GET", "settings")) || { blender: "" };
+  $("#app").innerHTML = `
+  <main class="library settings">
+    <a class="btn quiet" href="#/">← Songs</a>
+    <h1>Settings</h1>
+    <section class="block">
+      <h2>Export</h2>
+      <label class="field"><span>Blender (optional). With it, export also writes <b>music_video.blend</b>: the song, every clip at its timecode and a marker per lyric line, ready for fades and fixes in Blender's Video Editor. Without it you still get the MP4 and lyrics.srt.</span>
+        <input type="text" id="blPath" value="${esc(cfg.blender)}" placeholder="/path/to/blender" spellcheck="false"></label>
+      <div class="actions">
+        <button class="btn" id="blFind">Find Blender</button>
+        <button class="btn primary" id="blTest">Test and save</button>
+        <button class="btn quiet" id="blClear" ${cfg.blender ? "" : "hidden"}>Don't use Blender</button>
+      </div>
+      <div id="blFound"></div>
+      <p class="small" id="blStatus">${cfg.blender ? `Saved: <code>${esc(cfg.blender)}</code>` : "Not set, so exports don't include a .blend."}</p>
+    </section>
+  </main>`;
+  const input = $("#blPath"), status = $("#blStatus");
+  const show = (html, cls = "") => { status.className = `small ${cls}`; status.innerHTML = html; };
+  $("#blFind").onclick = () => act(async () => {
+    $("#blFind").disabled = true; $("#blFind").textContent = "Looking…";
+    const r = await api("GET", "settings/blender/find").finally(() => { $("#blFind").disabled = false; $("#blFind").textContent = "Find Blender"; });
+    $("#blFound").innerHTML = r.found.length
+      ? `<p class="small muted">Found on this machine. Click one to use it, then test it:</p><div class="found">${r.found.map((f) =>
+          `<button class="btn small" data-bl="${esc(f.path)}">Blender ${esc(f.version)} <code>${esc(f.path)}</code></button>`).join("")}</div>`
+      : `<p class="small">No Blender found in the usual places. Paste the path to the <code>blender</code> program, for example from the folder you unpacked it into.</p>`;
+    $$("[data-bl]").forEach((b) => (b.onclick = () => { input.value = b.dataset.bl; show("Click <b>Test and save</b> to check it."); }));
+  });
+  $("#blTest").onclick = () => act(async () => {
+    $("#blTest").disabled = true; show("Testing: writing a small project with this Blender…");
+    try {
+      const r = await api("POST", "settings/blender/test", { path: input.value.trim() });
+      if (!r.ok) return show(`<b>Didn't work.</b> ${esc(r.error).replace(/\n/g, "<br>")}`, "bad");
+      await api("PUT", "settings", { blender: input.value.trim() });
+      $("#blClear").hidden = false;
+      show(`<b>Works.</b> Blender ${esc(r.version)} wrote a test project in ${r.seconds} s. Saved; exports will include music_video.blend.`, "good");
+    } finally { $("#blTest").disabled = false; }
+  });
+  $("#blClear").onclick = () => act(async () => {
+    await api("PUT", "settings", { blender: "" });
+    input.value = ""; $("#blClear").hidden = true;
+    show("Blender turned off. Exports will skip the .blend.");
+  });
 }
 
 // =================================================================== song
@@ -172,6 +225,7 @@ function renderShell() {
   <div class="shell">
     <header class="topbar">
       <a class="btn quiet" href="#/">Songs</a>
+      <a class="btn quiet" href="#/settings" title="App settings: Blender for export">Settings</a>
       <span class="title">${esc(st.meta.title || st.slug)}</span>
       <div class="tabs" role="group" aria-label="View">
         <button data-tab="setup" aria-pressed="${S.tab === "setup"}">Setup</button>
@@ -1538,7 +1592,7 @@ async function openExport() {
   const useStale = new Set();
   const dlg = $("#dlg");
   dlg.innerHTML = `
-    <div class="dh"><h2>Export</h2><p class="muted small" style="margin:4px 0 0">Burns the captions in, trims every clip to its section, writes lyrics.srt and music_video.blend. Sections without a usable clip show their still with a slow push-in, so check this list first.</p></div>
+    <div class="dh"><h2>Export</h2><p class="muted small" style="margin:4px 0 0">Burns the captions in, trims every clip to its section, writes lyrics.srt${r.blender ? " and music_video.blend" : ""}. Sections without a usable clip show their still with a slow push-in, so check this list first.</p></div>
     <div class="db">
       ${fall.length ? `<table class="rows"><thead><tr><th>Section</th><th>Lyric</th><th>Shown as</th><th>Why</th><th></th></tr></thead><tbody>
       ${fall.map((x) => { const s = secById(x.uid); return `<tr><td>${tc(s.start)}</td><td>${esc(captionText(s.start, s.end) || "Instrumental")}</td>
@@ -1547,6 +1601,7 @@ async function openExport() {
         ${x.reason === "clip out of date" ? `<label class="check small"><input type="checkbox" data-stale="${x.uid}"> Use the old clip anyway</label>` : ""}</td></tr>`; }).join("")}</tbody></table>`
       : `<p>Every animated section has a current, approved clip.</p>`}
       ${statics ? `<p class="muted small">${statics} static section${statics > 1 ? "s" : ""} will show as stills, as intended.</p>` : ""}
+      ${r.blender ? "" : `<p class="notice">No Blender set, so this export makes the MP4 and lyrics.srt but no music_video.blend. <a href="#/settings" id="exSettings">Set Blender in Settings</a> if you want it.</p>`}
     </div>
     <div class="df"><button class="btn quiet" id="exCancel">Cancel</button><button class="btn primary" id="exOk"></button></div>`;
   const label = () => {
@@ -1556,6 +1611,7 @@ async function openExport() {
   $$("[data-stale]", dlg).forEach((c) => (c.onchange = () => { c.checked ? useStale.add(c.dataset.stale) : useStale.delete(c.dataset.stale); label(); }));
   $$("[data-go]", dlg).forEach((b) => (b.onclick = () => { dlg.close(); goTo(b.dataset.go); }));
   $("#exCancel").onclick = () => dlg.close();
+  $("#exSettings") && ($("#exSettings").onclick = () => dlg.close());
   $("#exOk").onclick = () => act(async () => { const since = Date.now() / 1000 - 2; setState(await api("POST", `songs/${S.slug}/export`, { use_stale: [...useStale] })); dlg.close(); openBusy("export", since); });
   label();
   dlg.showModal();

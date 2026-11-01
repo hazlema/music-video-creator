@@ -9,7 +9,8 @@ Non-linear music video editor with export to MP4 and Blender files.
 Give it a song and its lyrics. It times every lyric line to the audio, writes a
 storyboard, makes a still for each shot, and animates the stills you approve.
 You edit on a timeline, then export one MP4 with burned-in captions, plus a
-Blender project with every clip at its timecode.
+Blender project with every clip at its timecode (the Blender export needs
+Blender's path set in **Settings**; see [Setup](#setup)).
 
 Models run through [OpenRouter](https://openrouter.ai): transcription
 (ElevenLabs Scribe v2, which times every word), the storyboard, stills and
@@ -28,9 +29,13 @@ repo root:
 OPENROUTER_API_KEY=sk-or-...
 ```
 
-Blender is optional. If `/opt/blender-5.1.2-linux-x64/blender` exists, export
-also writes `music_video.blend`; to use another install, change `BLENDER` in
-`app/pipeline.py`.
+**Blender export needs the path set in Settings.** Blender is optional, and the
+app never guesses where it is. To have export also write `music_video.blend` (every clip
+at its timecode in Blender's Video Editor, ready for fades and fixes), open
+**Settings** in the app, click **Find Blender** or paste the path to the
+`blender` program, then **Test and save**: the test writes a small project with
+that Blender to make sure it works. The choice is kept in `settings.json` (not in
+git). Without it, export still makes the MP4 and `lyrics.srt`.
 
 ## The web app
 

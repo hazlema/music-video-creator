@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pipeline  # noqa: E402
 import providers  # noqa: E402
+import settings  # noqa: E402
 import songs  # noqa: E402
 from pipeline import tasks  # noqa: E402
 from songs import new_section, uid  # noqa: E402
@@ -108,6 +109,15 @@ def route(method, path, q, body, h):
         if method == "POST":
             title = (body.get("title") or "").strip() or "Untitled song"
             return {"slug": songs.create(title).slug}
+    if parts == ["settings"]:
+        if method == "GET":
+            return settings.get()
+        if method == "PUT":
+            return settings.save(body)
+    if parts == ["settings", "blender", "find"] and method == "GET":
+        return {"found": settings.find_blenders()}
+    if parts == ["settings", "blender", "test"] and method == "POST":
+        return settings.test_blender(body.get("path"), pipeline.ffmpeg())
     if parts == ["models"] and method == "GET":
         try:
             catalog = providers.model_catalog()
@@ -357,7 +367,7 @@ def route(method, path, q, body, h):
         return {**state(song), "started": started, "skipped": skipped}
 
     if key == ("GET", "export-plan"):
-        return {"rows": pipeline.plan_export(song)}
+        return {"rows": pipeline.plan_export(song), "blender": settings.blender()}
 
     if key == ("POST", "export"):
         if tasks.busy(song.slug, "export"):
