@@ -509,14 +509,15 @@ def still_prompt(song, s):
 _still_slots = threading.Semaphore(4)
 
 
-def make_still(song, sid, task):
+def make_still(song, sid, task, model=None):
+    """model overrides the song's Stills model for this one still ("Regenerate with")."""
     with song.lock:
         s = song.section(sid)
         if not s["image_prompt"].strip():
             raise ValueError("This section has no image prompt yet. Run the storyboard or write one.")
         prompt = still_prompt(song, s)
         refs = still_refs(song, s)
-        model = song.meta["image_model"]
+        model = model or song.meta["image_model"]
     task["msg"] = "Waiting for a slot"
     with _still_slots:
         task["msg"] = f"Generating with {model}"

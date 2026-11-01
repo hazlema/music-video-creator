@@ -119,6 +119,7 @@ textarea:focus, input:focus, select:focus { border-color: var(--wave-dim); outli
 .models { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 .models select { width: 100%; }
 .models .model-video { grid-column: 1 / -1; }
+.models .hint .warn { color: var(--coral); font-weight: 600; }
 .models .hint { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 
 /* ------------------------------------------------------------ workspace */
@@ -300,3 +301,9 @@ dialog.busy { width: min(520px, 92vw); }
 .ch-head .ch-note { margin-left: auto; color: var(--amber); font-size: 12px; }
 .asks { margin-top: 10px; }
 .asks ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+
+/* regenerate with */
+.regen-list { display: flex; flex-direction: column; gap: 2px; }
+.regen-row { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 7px 8px; border-radius: var(--radius-s); cursor: pointer; }
+.regen-row:hover { background: var(--panel-2); }
+.regen-row:has(input:checked) { background: var(--panel-2); outline: 1px solid var(--wave-dim); }

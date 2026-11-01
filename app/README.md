@@ -16,7 +16,7 @@ uv run --with imageio-ffmpeg --with numpy --with pillow python app/import_media.
 ## Files
 - `server.py`: HTTP routes and the JSON state the page polls
 - `pipeline.py`: transcribe/align (reuses `mv/align.py`), storyboard, stills, clip jobs, export (reuses `mv/blend.py`)
-- `providers.py`: every OpenRouter call; stills sit behind `StillProvider` so a local Flux model can replace `OpenRouterStills`
+- `providers.py`: every OpenRouter call; stills sit behind `StillProvider`: `OpenRouterStills` or `LocalStills`, which calls the sidecar (`../sidecar/klein_server.py`)
 - `songs.py`: the song folder and section model
 - `static/`: the page (no build step)
 
@@ -37,4 +37,4 @@ a slow push-in (listed first, with "Use the old clip anyway"), `lyrics.srt`,
 `music_video.blend`, in-page player.
 
 Not yet: undo/redo, Copy look, re-run storyboard for a selection, recurrence links,
-needs-attention filter, local Flux.
+needs-attention filter, local video models.

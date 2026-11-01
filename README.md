@@ -11,9 +11,11 @@ storyboard, makes a still for each shot, and animates the stills you approve.
 You edit on a timeline, then export one MP4 with burned-in captions, plus a
 Blender project with every clip at its timecode.
 
-All models run through [OpenRouter](https://openrouter.ai): transcription, the
-storyboard, stills and video. A whole song in stills costs about $1; clips are
-priced per second (Grok Imagine Video 1.5 is $0.08/s at 480p).
+Models run through [OpenRouter](https://openrouter.ai): transcription
+(ElevenLabs Scribe v2, which times every word), the storyboard, stills and
+video. Stills can also run free on your own GPU with FLUX.2 Klein (see
+[Local stills](#local-stills-optional-free)). A whole song in API stills costs
+about $1; clips are priced per second (Grok Imagine Video 1.5 is $0.08/s at 480p).
 
 ## Setup
 
@@ -44,6 +46,23 @@ running; clip jobs that are in flight when it stops resume when it starts again.
 Songs are saved in `songs/<name>/` (not in git): audio, lyrics, plan, every
 still and clip version, and exports.
 
+### Keyboard and mouse (timeline)
+
+| Input | What it does |
+|---|---|
+| Space | Play or pause |
+| ← / → | Step to the previous or next section |
+| Click / Shift-click | Select a section / select a range |
+| Alt+A | Select every section |
+| Esc | Clear the selection |
+| + / − or the mouse wheel | Zoom, keeping the playhead in place |
+| Shift+wheel | Scroll along the song |
+| Hold the middle button and drag | Pan the timeline |
+| Ctrl+Enter | Send the request in **Ask for a change** |
+
+Section edges can only be dragged with **Lock timing** unticked in the timeline
+toolbar; it's on by default so a stray drag can't move a cut.
+
 ### Import an mv/ song folder
 
 ```
@@ -57,6 +76,45 @@ uv run --with imageio-ffmpeg --with numpy --with pillow python app/import_media.
 
 Brings in the audio, lyrics, brief and transcript, re-times the lyrics, keeps the
 shots and prompts, and adds each still as version 1 and each clip as clip 1.
+
+## Local stills (optional, free)
+
+Stills can be made on your own GPU with
+[FLUX.2 Klein 4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B)
+(Apache 2.0) instead of a paid API: about 5 seconds and $0 a still. The model
+runs in a separate process, the sidecar, so you start two things, each in its
+own terminal:
+
+```
+# terminal 1: the local image model (port 8790)
+cd sidecar
+uv run python klein_server.py
+
+# terminal 2: the app (port 8780)
+uv run --with imageio-ffmpeg --with numpy --with pillow python app/server.py
+```
+
+The sidecar's first run installs PyTorch and diffusers into `sidecar/.venv` and
+downloads the model (about 15 GB) into the Hugging Face cache. It's ready when it
+prints `Klein sidecar on http://127.0.0.1:8790 (fast mode)`.
+
+Then pick **FLUX.2 Klein 4B (local, your GPU)** as the Stills model in a song's
+Setup; the hint under it says whether the sidecar is running. If it isn't, the
+section shows the command to start it instead of failing quietly.
+
+Klein handles most shots. When one is beyond it (a busy scene, several
+characters), select the section and use **Regenerate with…** to make just that
+still with an API model such as GPT Image or Nano Banana; the song keeps Klein,
+and the new still is added as another version. It works on a selection too.
+
+| Switch | What it does |
+|---|---|
+| `--port <n>` | Listen on port `n` instead of 8790. Point the app at it with `MV_SIDECAR=http://127.0.0.1:<n>`. |
+| `--offload` | Keep the model in system RAM and move each part onto the GPU only while it runs. Slower (about 25 s a still instead of 5 s) but needs only about 8 GB of VRAM. Without it, the sidecar switches to this mode by itself if the GPU runs out of memory. |
+
+Needs an NVIDIA GPU: 16 GB runs the fast mode with room to spare for other
+programs holding a few GB. Reference images work, so characters stay
+consistent from shot to shot.
 
 ## Command-line pipeline (mv/)
 

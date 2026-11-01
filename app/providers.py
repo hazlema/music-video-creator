@@ -7,6 +7,7 @@ OpenRouterStills later without touching the rest of the app.
 import base64
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -135,8 +136,51 @@ class OpenRouterStills(StillProvider):
         return base64.b64decode(b64), ext, (data.get("usage") or {}).get("cost") or 0
 
 
+# ------------------------------------------------------------ local stills
+
+SIDECAR = os.environ.get("MV_SIDECAR", "http://127.0.0.1:8790")
+LOCAL_STILLS = {"local/flux2-klein-4b": "FLUX.2 Klein 4B (local, your GPU)"}
+SIDECAR_HELP = "Start it in its own terminal: cd sidecar && uv run python klein_server.py"
+
+
+def sidecar_status():
+    """The sidecar's /health, or None when it isn't running."""
+    try:
+        with urllib.request.urlopen(SIDECAR + "/health", timeout=1.5) as r:
+            return json.load(r)
+    except (OSError, ValueError):
+        return None
+
+
+class LocalStills(StillProvider):
+    """FLUX.2 [klein] on this machine via sidecar/klein_server.py. Free."""
+
+    def __init__(self, model):
+        self.model = model
+
+    def generate(self, prompt, refs):
+        body = {"prompt": prompt, "width": 1360, "height": 768,
+                "refs": [{"label": label, "image": data_url(path, 1024).split(",", 1)[1]} for label, path in refs]}
+        req = urllib.request.Request(SIDECAR + "/generate", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            # Requests queue on the GPU, so allow for a long wait behind others.
+            with urllib.request.urlopen(req, timeout=1800) as r:
+                data = json.load(r)
+        except urllib.error.HTTPError as e:
+            try:
+                detail = json.load(e).get("error")
+            except ValueError:
+                detail = str(e)
+            raise ProviderError(f"Local model failed: {detail}") from None
+        except OSError:
+            raise ProviderError(f"The local image model isn't running. {SIDECAR_HELP}") from None
+        return base64.b64decode(data["image"]), "png", 0
+
+
 def still_provider(model):
-    # Local Flux slots in here later, e.g. `if model.startswith("local/")`.
+    if model.startswith("local/"):
+        return LocalStills(model)
     return OpenRouterStills(model)
 
 
@@ -201,7 +245,8 @@ def model_catalog():
     llm = [{"id": i, "name": models[i]["name"].split(": ", 1)[-1],
             "price": f"${per_m(models[i]['pricing'].get('prompt')):g} in · ${per_m(models[i]['pricing'].get('completion')):g} out per M tokens"}
            for i in STORYBOARD_MODELS if i in models]
-    image = [{"id": m["id"], "name": m["name"].split(": ", 1)[-1]} for m in models.values()
+    image = [{"id": i, "name": name, "local": True} for i, name in LOCAL_STILLS.items()]
+    image += [{"id": m["id"], "name": m["name"].split(": ", 1)[-1]} for m in models.values()
              # image-only models (FLUX, Seedream...) need a different request; not wired up yet
              if {"image", "text"} <= set(m.get("architecture", {}).get("output_modalities") or [])
              and not m["id"].startswith("openrouter/") and "-preview" not in m["id"]]

@@ -15,3 +15,5 @@ media/clips/
 media/raw/
 media/stills/
 spike/test/
+
+.venv/

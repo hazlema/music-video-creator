@@ -112,8 +112,10 @@ def route(method, path, q, body, h):
         try:
             catalog = providers.model_catalog()
         except providers.ProviderError:
-            catalog = {"llm": [], "image": [], "video": [], "transcribe": []}   # offline: Setup falls back to typing an ID
-        return {**catalog, "still_costs": songs.still_costs()}
+            catalog = {"llm": [], "image": [{"id": i, "name": n, "local": True} for i, n in providers.LOCAL_STILLS.items()],
+                       "video": [], "transcribe": []}   # offline: Setup falls back to typing an ID
+        return {**catalog, "still_costs": songs.still_costs(), "sidecar": providers.sidecar_status(),
+                "sidecar_help": providers.SIDECAR_HELP}
     if len(parts) < 2 or parts[0] != "songs":
         raise HttpError(404, "Not found")
     try:
@@ -231,6 +233,7 @@ def route(method, path, q, body, h):
     if key == ("POST", "stills"):
         with song.lock:
             wanted = body.get("uids") or [s["uid"] for s in song.plan if s["still"] is None]
+            model = (body.get("model") or "").strip() or None   # "Regenerate with": just these stills
             chosen, skipped = [], []
             for sid in wanted:
                 s = song.section(sid)
@@ -243,7 +246,7 @@ def route(method, path, q, body, h):
                 else:
                     chosen.append(sid)
         for sid in chosen:
-            tasks.start(song, "still", lambda t, sid=sid: pipeline.make_still(song, sid, t), uid=sid, label="Still")
+            tasks.start(song, "still", lambda t, sid=sid: pipeline.make_still(song, sid, t, model), uid=sid, label="Still")
         return {**state(song), "started": len(chosen), "skipped": skipped}
 
     if key == ("POST", "split"):

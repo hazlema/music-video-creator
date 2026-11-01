@@ -119,6 +119,7 @@ async function openSong(slug, tab) {
   S.st = st;
   st.tasks.forEach((t) => (S.seenTasks[t.tid] = t.state));
   S.tab = tab || (st.plan.length ? "timeline" : "setup");
+  if (S.tab === "setup") S.models = null;   // fetch the model list (and sidecar status) fresh on each visit
   if (fresh && st.has_audio) {
     audio.src = fileUrl("song.wav");
     S.peaks = await api("GET", `songs/${slug}/peaks`).catch(() => null);
@@ -195,7 +196,7 @@ function renderShell() {
           <button class="btn play" id="btnPlay" aria-label="Play">▶</button>
           <span class="time" id="time"></span>
           <label class="check small"><input type="checkbox" id="stillsOnly" ${S.previewMode === "stills" ? "checked" : ""}> Stills only</label>
-          <span class="muted small">Space plays, arrow keys step through sections, Shift-click selects a range.</span>
+          <span class="muted small">Space plays, arrow keys step through sections, Shift-click selects a range, Alt+A selects all, Esc clears.</span>
         </div>
       </div>
       <aside class="inspector" id="inspector"></aside>
@@ -457,12 +458,15 @@ function renderModels() {
   };
   const llm = M.llm.find((o) => o.id === setupVal("llm_model"));
   const cost = M.still_costs?.[setupVal("image_model")];
+  const imgLocal = setupVal("image_model").startsWith("local/");
   const resList = vid ? vid.resolutions : ["480p", "720p", "1080p"];
   el.innerHTML = `
     ${picker("transcribe", "Transcription", M.transcribe || [], (o) => o.name,
       (M.transcribe || []).find((o) => o.id === setupVal("transcribe_model"))?.note || "Times the lyrics. Change it before transcribing.")}
     ${picker("llm", "Storyboard", M.llm, (o) => o.name, llm ? llm.price : "Writes the storyboard and prompt changes.")}
-    ${picker("image", "Stills", M.image, (o) => o.name, cost ? `About $${cost.toFixed(3)} a still on your songs so far.` : "Price shows here after its first still.")}
+    ${picker("image", "Stills", M.image, (o) => o.name, imgLocal
+      ? (M.sidecar ? `Free · the local model is running (${esc(M.sidecar.mode)} mode).` : `<b class="warn">The local model isn't running.</b> ${esc(M.sidecar_help)}`)
+      : cost ? `About $${cost.toFixed(3)} a still on your songs so far.` : "Price shows here after its first still.")}
     ${picker("video", "Video", M.video, (o) => `${o.name} (from ${perSec(o, o.resolutions.reduce((a, r) => (o.per_second[r] < o.per_second[a] ? r : a)))})`,
       vid ? `${perSec(vid, res) || "Price unknown"} at ${esc(res)} · clips up to ${vid.max_seconds} s` : "Only models that can animate a still are listed.")}
     <label class="field"><span>Video resolution</span>
@@ -479,6 +483,9 @@ function renderModels() {
         const v = M.video.find((x) => x.id === sel.value);
         if (v && !v.resolutions.includes(setupVal("video_resolution"))) setupDraftSet("video_resolution", v.resolutions[0]);
       }
+    }
+    if (kind === "image" && sel.value.startsWith("local/")) {   // is the sidecar up right now?
+      api("GET", "models").then((m) => { S.models = m; renderModels(); }).catch(() => {});
     }
     renderModels();
     if (!sel.value) $(`[data-model-id="${kind}"]`)?.focus();
@@ -894,10 +901,10 @@ async function approve(uids, approved = true) {
   });
 }
 
-async function generateStills(uids) {
+async function generateStills(uids, model) {
   return act(async () => {
     const since = Date.now() / 1000 - 2;
-    const r = await api("POST", `songs/${S.slug}/stills`, { uids });
+    const r = await api("POST", `songs/${S.slug}/stills`, model ? { uids, model } : { uids });
     setState(r);
     if (r.started > 1) openBusy("still", since, r.started);
     if (r.skipped.length) toast(`Skipped: ${r.skipped.join("; ")}`, true);
@@ -916,6 +923,37 @@ function generateMissing() {
   const ready = open.filter((s) => s.image_prompt);
   if (!ready.length) return toast(`${open.length} section${open.length > 1 ? "s have" : " has"} no image prompt yet. Rewrite the storyboard, or write a prompt in the inspector.`, true);
   generateStills(null);
+}
+
+// "Regenerate with…": make these stills with another image model, without
+// changing the song's Stills model. Each still remembers the model it came from.
+async function openRegenWith(uids) {
+  if (!S.models) S.models = await act(() => api("GET", "models"));
+  if (!S.models) return;
+  const M = S.models, songModel = S.st.meta.image_model;
+  const list = [...M.image];
+  if (!list.some((o) => o.id === songModel)) list.unshift({ id: songModel, name: songModel });
+  let pick = S.regenModel && list.some((o) => o.id === S.regenModel) ? S.regenModel : (list.find((o) => o.id !== songModel) || list[0]).id;
+  const price = (o) => o.local ? (M.sidecar ? "Free, on your GPU" : "Free, but the local model isn't running")
+    : M.still_costs?.[o.id] != null ? `about ${money(M.still_costs[o.id])} a still` : "price shows after its first still";
+  const n = uids.length, dlg = $("#dlg");
+  dlg.innerHTML = `
+    <div class="dh"><h2>${n > 1 ? `Regenerate ${n} stills with…` : "Regenerate with…"}</h2>
+      <p class="muted small" style="margin:4px 0 0">Same prompt and references, another image model. The song's Stills model stays ${esc(list.find((o) => o.id === songModel)?.name || songModel)}; the new version is added alongside the others.</p></div>
+    <div class="db"><div class="regen-list">${list.map((o) => `
+      <label class="regen-row"><input type="radio" name="rw" value="${esc(o.id)}" ${o.id === pick ? "checked" : ""}>
+        <span class="nm">${esc(o.name)}${o.id === songModel ? ` <span class="muted small">(song's model)</span>` : ""}</span>
+        <span class="muted small">${price(o)}</span></label>`).join("")}</div></div>
+    <div class="df"><button class="btn quiet" id="rwCancel">Cancel</button><button class="btn primary" id="rwGo"></button></div>`;
+  const label = () => {
+    const o = list.find((x) => x.id === pick);
+    $("#rwGo").textContent = `Generate ${n > 1 ? `${n} stills` : "still"} with ${o?.name || pick}`;
+  };
+  $$("[name=rw]", dlg).forEach((r) => (r.onchange = () => { pick = r.value; label(); }));
+  $("#rwCancel").onclick = () => dlg.close();
+  $("#rwGo").onclick = () => { dlg.close(); S.regenModel = pick; generateStills(uids, pick); };
+  label();
+  dlg.showModal();
 }
 
 function writeStoryboard() {
@@ -969,6 +1007,7 @@ function renderInspector() {
       <button data-still="${v.n}" aria-pressed="${v.n === s.still}" title="${esc(v.model)}${v.cost ? " · " + money(v.cost) : ""}" ${lock}><img src="${fileUrl("stills/" + v.file)}" alt="Still ${v.n}"><span class="n">${v.n}</span></button>`).join("")}</div>` : ""}
     <div class="actions">
       <button class="btn primary" id="iRegen" ${busy || s.locked ? "disabled" : ""}>${busy ? "Generating…" : s.stills.length ? "Regenerate still" : "Generate still"}</button>
+      <button class="btn" id="iRegenWith" ${busy || s.locked ? "disabled" : ""}>${s.stills.length ? "Regenerate" : "Generate"} with…</button>
       ${dirty ? `<span class="muted small" style="align-self:center">Uses the saved prompt. Save first to use your edits.</span>` : ""}
     </div>
   </div>
@@ -1122,6 +1161,7 @@ function bindInspector(s) {
   }));
   $$("[data-confirm-lines]", el).forEach((b) => (b.onclick = () => confirmLines(b.dataset.confirmLines.split(",").map(Number))));
   $("#iApproved").onchange = (e) => approve([id], e.target.checked);
+  $("#iRegenWith").onclick = () => (s.image_prompt.trim() ? openRegenWith([id]) : $("#iRegen").click());
   $("#iRegen").onclick = () => {
     if (!s.image_prompt.trim()) return toast(plan().some((x) => x.image_prompt)
       ? "This section has no image prompt yet. Write one under Story and save it, or use Ask for a change."
@@ -1335,6 +1375,7 @@ function renderBulk(el, sel) {
     <div class="actions">
       <button class="btn primary" id="bAsk">Ask for a change…</button>
       <button class="btn" id="bRegen">Regenerate ${sel.length} stills</button>
+      <button class="btn" id="bRegenWith">Regenerate with…</button>
       <button class="btn" id="bApprove">Approve selection</button>
       <button class="btn" id="bAnimate">Animate selection…</button>
       <button class="btn" id="bMerge" ${adjacent ? "" : "disabled"}>Merge into one section</button>
@@ -1343,6 +1384,7 @@ function renderBulk(el, sel) {
   </div>`;
   $("#bAsk").onclick = () => openChange(S.sel);
   $("#bRegen").onclick = () => generateStills(S.sel);
+  $("#bRegenWith").onclick = () => openRegenWith(S.sel);
   $("#bApprove").onclick = () => approve(S.sel);
   $("#bAnimate").onclick = () => openAnimate(S.sel);
   $("#bMerge").onclick = () => $("#tbMerge").click();
@@ -1541,7 +1583,9 @@ function openResult() {
 document.addEventListener("keydown", (e) => {
   if (S.view !== "song" || S.tab !== "timeline" || $("#dlg")?.open) return;
   if (e.target.closest("input, textarea, select")) return;
-  if (e.key === " ") { e.preventDefault(); togglePlay(); }
+  // Alt+A: select every section. e.code, because Alt+A types "å" on a Mac.
+  if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyA") { e.preventDefault(); S.sel = plan().map((x) => x.uid); S.anchor = S.sel[0] ?? null; update(); }
+  else if (e.key === " ") { e.preventDefault(); togglePlay(); }
   else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
   else if (e.key === "+" || e.key === "=") zoomAt(1.5);
