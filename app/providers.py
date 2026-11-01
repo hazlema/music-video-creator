@@ -60,11 +60,12 @@ def data_url(path, max_side=1536):
 
 # ---------------------------------------------------------------- transcribe
 
-def transcribe(wav_bytes):
+def transcribe(wav_bytes, model="elevenlabs/scribe-v2"):
     data = _request("/audio/transcriptions", {
-        "model": "nvidia/nemotron-3.5-transcribe",
+        "model": model,
         "input_audio": {"data": base64.b64encode(wav_bytes).decode(), "format": "wav"},
         "response_format": "verbose_json",
+        "timestamp_granularities": ["word", "segment"],
     })
     cost = (data.get("usage") or {}).get("cost") or 0
     return data, cost
@@ -177,6 +178,14 @@ STORYBOARD_MODELS = [
     "deepseek/deepseek-v4.1-flash", "qwen/qwen3.8-max-0902", "moonshotai/kimi-k3.1-pro",
 ]
 
+# Transcription models offered in Setup. Lyric timing needs per-word times;
+# Scribe v2 gives them and labels instrumental stretches instead of guessing words.
+TRANSCRIBE_MODELS = [
+    ("elevenlabs/scribe-v2", "Per-word timing; marks the intro and outro as music."),
+    ("nvidia/nemotron-3.5-transcribe", "No timing since late Oct 2026; the app falls back to 4-second pieces."),
+    ("openai/whisper-large-v3", "Per-word timing, but often mishears sung lyrics."),
+]
+
 _catalog = {"at": 0, "data": None}
 
 
@@ -184,7 +193,7 @@ def model_catalog():
     """Choices for the Setup model pickers, from OpenRouter's live lists (cached 1h)."""
     if _catalog["data"] and time.time() - _catalog["at"] < 3600:
         return _catalog["data"]
-    models = {m["id"]: m for m in _request("/models", timeout=60).get("data", [])}
+    models = {m["id"]: m for m in _request("/models?output_modalities=all", timeout=60).get("data", [])}
 
     def per_m(v):
         return round(float(v or 0) * 1e6, 2)
@@ -193,7 +202,8 @@ def model_catalog():
             "price": f"${per_m(models[i]['pricing'].get('prompt')):g} in · ${per_m(models[i]['pricing'].get('completion')):g} out per M tokens"}
            for i in STORYBOARD_MODELS if i in models]
     image = [{"id": m["id"], "name": m["name"].split(": ", 1)[-1]} for m in models.values()
-             if "image" in (m.get("architecture", {}).get("output_modalities") or [])
+             # image-only models (FLUX, Seedream...) need a different request; not wired up yet
+             if {"image", "text"} <= set(m.get("architecture", {}).get("output_modalities") or [])
              and not m["id"].startswith("openrouter/") and "-preview" not in m["id"]]
     video = []
     for m in video_models().values():
@@ -206,7 +216,9 @@ def model_catalog():
                       "per_second": {r: video_price(m["id"], r, 1) - video_price(m["id"], r, 0) for r in res},
                       "max_seconds": max(m["supported_durations"])})
     video.sort(key=lambda v: min(v["per_second"].values()))
-    _catalog.update(at=time.time(), data={"llm": llm, "image": image, "video": video})
+    transcribe = [{"id": i, "name": models[i]["name"].split(": ", 1)[-1] if i in models else i, "note": note}
+                  for i, note in TRANSCRIBE_MODELS]
+    _catalog.update(at=time.time(), data={"llm": llm, "image": image, "video": video, "transcribe": transcribe})
     return _catalog["data"]
 
 

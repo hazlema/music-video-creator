@@ -20,7 +20,7 @@ from songs import ROOT, new_section, read_json, timecode, uid, write_json
 
 sys.path.insert(0, str(ROOT / "mv"))
 import align as mv_align  # noqa: E402
-from transcribe import downsample_16k_mono  # noqa: E402
+from transcribe import downsample_16k_mono, word_segments  # noqa: E402
 
 LOW_CONFIDENCE = 0.6
 BRIDGE_GAP = 2.0     # a lyric shot runs on to the next line when the gap is this short
@@ -146,13 +146,58 @@ def _after_audio(song):
 
 # =========================================================== transcribe/align
 
+COARSE = 20.0   # a transcript phrase longer than this carries no usable timing
+PIECE = 4.0     # seconds per piece when re-transcribing for timing
+
+
 def transcribe(song, task):
-    task["msg"] = "Sending the song to nemotron-3.5-transcribe"
-    data, cost = providers.transcribe(downsample_16k_mono(song.dir / "song.wav"))
-    write_json(song.dir / "transcript.json", data)
+    model = song.meta.get("transcribe_model") or "elevenlabs/scribe-v2"
+    task["msg"] = f"Sending the song to {model}"
+    wav = downsample_16k_mono(song.dir / "song.wav")
+    data, cost = providers.transcribe(wav, model)
     song.add_spend("Transcription", cost)
+    segs = word_segments(data)
+    if segs:   # per-word times: each sung word becomes its own segment
+        data["phrases"], data["segments"] = data.get("segments"), segs
+    # Without word times a song can come back as one phrase spanning the whole
+    # track, which would spread the words evenly from 0:00 and put lyrics over
+    # the intro. Then transcribe short pieces instead: each piece's words land
+    # in its window, and pieces with no singing come back empty or as filler
+    # that isn't in the lyrics.
+    elif any(seg["end"] - seg["start"] > COARSE for seg in data.get("segments") or []):
+        task["msg"] = "No timing came back; transcribing in short pieces to find where the words are"
+        data["segments"], cost = transcribe_pieces(wav, model)
+        data["pieces"] = PIECE
+        song.add_spend("Transcription (timing pieces)", cost)
+    write_json(song.dir / "transcript.json", data)
     task["msg"] = "Matching to your lyrics"
     align(song)
+
+
+def transcribe_pieces(wav, model):
+    """Transcribe a 16 kHz WAV in PIECE-second windows; segments in song time."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    with wave.open(io.BytesIO(wav)) as r:
+        params, rate, n = r.getparams(), r.getframerate(), r.getnframes()
+        frames = r.readframes(n)
+        bpf = r.getsampwidth() * r.getnchannels()
+    length = n / rate
+
+    def one(t0):
+        t1 = min(t0 + PIECE, length)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setparams(params)
+            w.writeframes(frames[int(t0 * rate) * bpf: int(t1 * rate) * bpf])
+        d, c = providers.transcribe(buf.getvalue(), model)
+        text = " ".join(seg["text"].strip() for seg in d.get("segments") or []).strip()
+        return {"start": round(t0, 3), "end": round(t1, 3), "text": text}, c
+
+    starts = [i * PIECE for i in range(int(length // PIECE) + 1) if i * PIECE < length - 0.2]
+    with ThreadPoolExecutor(8) as ex:
+        got = list(ex.map(one, starts))
+    return [seg for seg, _ in got if seg["text"]], sum(c for _, c in got)
 
 
 def align(song):

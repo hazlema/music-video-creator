@@ -207,7 +207,7 @@ function renderShell() {
 
   $$("[data-tab]").forEach((b) => (b.onclick = () => (location.hash = `#/song/${S.slug}/${b.dataset.tab}`)));
   $("#btnStoryboard").onclick = writeStoryboard;
-  $("#btnStills").onclick = () => generateStills(null);
+  $("#btnStills").onclick = generateMissing;
   $("#btnAnimate").onclick = () => openAnimate(S.sel.length ? S.sel : null);
   $("#btnExport").onclick = openExport;
   if (S.tab === "timeline") {
@@ -227,8 +227,8 @@ function update() {
   $("#btnStoryboard").disabled = running("storyboard") || !st.plan.length;
   $("#btnStoryboard").textContent = running("storyboard") ? "Writing storyboard…" : st.plan.some((s) => s.image_prompt) ? "Rewrite storyboard" : "Write storyboard";
   const missing = st.plan.filter((s) => s.still === null && s.image_prompt && !s.locked && !running("still", s.uid)).length;
-  $("#btnStills").disabled = !missing;
-  $("#btnStills").textContent = missing ? `Generate ${missing} missing stills` : "No missing stills";
+  // Always clickable: when there's nothing to make, the click says why.
+  $("#btnStills").textContent = missing ? `Generate ${missing} missing stills` : "Generate missing stills";
   $("#btnAnimate").disabled = !st.plan.length;
   $("#btnExport").disabled = !st.plan.length || running("export");
   $("#btnExport").textContent = running("export") ? exportProgress() : "Export…";
@@ -322,7 +322,7 @@ function renderBusy() {
 const SETUP_FIELDS = {
   fTitle: "title", fLyrics: "lyrics", fBrief: "brief", fStyle: "style",
 };
-const MODEL_FIELDS = { llm: "llm_model", image: "image_model", video: "video_model" };
+const MODEL_FIELDS = { transcribe: "transcribe_model", llm: "llm_model", image: "image_model", video: "video_model" };
 let setupTimer = null;
 
 function setupSaved(field) {
@@ -459,6 +459,8 @@ function renderModels() {
   const cost = M.still_costs?.[setupVal("image_model")];
   const resList = vid ? vid.resolutions : ["480p", "720p", "1080p"];
   el.innerHTML = `
+    ${picker("transcribe", "Transcription", M.transcribe || [], (o) => o.name,
+      (M.transcribe || []).find((o) => o.id === setupVal("transcribe_model"))?.note || "Times the lyrics. Change it before transcribing.")}
     ${picker("llm", "Storyboard", M.llm, (o) => o.name, llm ? llm.price : "Writes the storyboard and prompt changes.")}
     ${picker("image", "Stills", M.image, (o) => o.name, cost ? `About $${cost.toFixed(3)} a still on your songs so far.` : "Price shows here after its first still.")}
     ${picker("video", "Video", M.video, (o) => `${o.name} (from ${perSec(o, o.resolutions.reduce((a, r) => (o.per_second[r] < o.per_second[a] ? r : a)))})`,
@@ -902,6 +904,20 @@ async function generateStills(uids) {
   });
 }
 
+function generateMissing() {
+  const p = plan();
+  const why = !p.length ? "Transcribe the song first. Stills are made per section, and sections come from the timed lyrics."
+    : running("storyboard") ? "The storyboard is still being written. Stills can be made once it's done."
+    : !p.some((s) => s.image_prompt) ? "Write the storyboard first. Each still is made from its section's image prompt, and the storyboard writes them."
+    : null;
+  if (why) return toast(why, true);
+  const open = p.filter((s) => s.still === null && !s.locked && !running("still", s.uid));
+  if (!open.length) return toast(p.some((s) => s.still === null) ? "The sections without a still are locked or already generating." : "Every section already has a still. Select sections and use Regenerate stills to make new versions.");
+  const ready = open.filter((s) => s.image_prompt);
+  if (!ready.length) return toast(`${open.length} section${open.length > 1 ? "s have" : " has"} no image prompt yet. Rewrite the storyboard, or write a prompt in the inspector.`, true);
+  generateStills(null);
+}
+
 function writeStoryboard() {
   const redo = plan().some((s) => s.image_prompt);
   if (redo && !confirm("Rewrite the storyboard for every unlocked section? Beats and prompts you edited by hand are kept, and no stills are generated.")) return;
@@ -952,7 +968,7 @@ function renderInspector() {
     ${s.stills.length ? `<div class="versions">${[...s.stills].reverse().map((v) => `
       <button data-still="${v.n}" aria-pressed="${v.n === s.still}" title="${esc(v.model)}${v.cost ? " · " + money(v.cost) : ""}" ${lock}><img src="${fileUrl("stills/" + v.file)}" alt="Still ${v.n}"><span class="n">${v.n}</span></button>`).join("")}</div>` : ""}
     <div class="actions">
-      <button class="btn primary" id="iRegen" ${busy || s.locked || !val("image_prompt").trim() ? "disabled" : ""}>${busy ? "Generating…" : s.stills.length ? "Regenerate still" : "Generate still"}</button>
+      <button class="btn primary" id="iRegen" ${busy || s.locked ? "disabled" : ""}>${busy ? "Generating…" : s.stills.length ? "Regenerate still" : "Generate still"}</button>
       ${dirty ? `<span class="muted small" style="align-self:center">Uses the saved prompt. Save first to use your edits.</span>` : ""}
     </div>
   </div>
@@ -1106,7 +1122,12 @@ function bindInspector(s) {
   }));
   $$("[data-confirm-lines]", el).forEach((b) => (b.onclick = () => confirmLines(b.dataset.confirmLines.split(",").map(Number))));
   $("#iApproved").onchange = (e) => approve([id], e.target.checked);
-  $("#iRegen").onclick = () => generateStills([id]);
+  $("#iRegen").onclick = () => {
+    if (!s.image_prompt.trim()) return toast(plan().some((x) => x.image_prompt)
+      ? "This section has no image prompt yet. Write one under Story and save it, or use Ask for a change."
+      : "Write the storyboard first. Each still is made from its section's image prompt, and the storyboard writes them.", true);
+    generateStills([id]);
+  };
   $("#iAnimate") && ($("#iAnimate").onclick = () => animateNow([id]));
   $("#iMarkFailed") && ($("#iMarkFailed").onclick = () => {
     if (!confirm("Mark this job failed? If the provider did receive it, animating again means you may pay twice.")) return;

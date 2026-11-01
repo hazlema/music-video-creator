@@ -65,7 +65,7 @@ The scripts the app grew out of. Each one works on a song folder holding
 
 | Step | Command | What it does |
 |---|---|---|
-| 1 | `python3 mv/transcribe.py <song_dir> [--full]` | Timed phrases from the audio, written to `transcript.json`. Sends a 16 kHz mono copy; `--full` sends the original WAV. |
+| 1 | `python3 mv/transcribe.py <song_dir> [--full] [--model <id>]` | Timed words from the audio, written to `transcript.json`. Sends a 16 kHz mono copy; `--full` sends the original WAV. `--model` picks the OpenRouter transcription model (default `elevenlabs/scribe-v2`, which times every word). |
 | 2 | `python3 mv/align.py <song_dir>` | Times each line of `lyrics.txt` against the transcript, written to `lines.json`. |
 | 3 | `python3 mv/storyboard.py <song_dir> [--model <id>]` | One shot per lyric line with an image prompt and a motion prompt, written to `plan.json`. `--model` picks the OpenRouter model (default `anthropic/claude-sonnet-5.5`). |
 | 4 | `python3 mv/finish.py <song_dir> fetch` | Downloads each shot's `still_url` / `video_url` from `plan.json`. |

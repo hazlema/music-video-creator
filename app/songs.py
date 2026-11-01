@@ -28,6 +28,7 @@ DEFAULTS = {
     "title": "",
     "style": "",
     "refs": [],
+    "transcribe_model": "elevenlabs/scribe-v2",
     "llm_model": "anthropic/claude-sonnet-5.5",
     "image_model": "google/gemini-nano-banana-2.1",
     "video_model": "x-ai/grok-imagine-video-1.5",

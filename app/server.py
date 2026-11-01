@@ -112,7 +112,7 @@ def route(method, path, q, body, h):
         try:
             catalog = providers.model_catalog()
         except providers.ProviderError:
-            catalog = {"llm": [], "image": [], "video": []}   # offline: Setup falls back to typing an ID
+            catalog = {"llm": [], "image": [], "video": [], "transcribe": []}   # offline: Setup falls back to typing an ID
         return {**catalog, "still_costs": songs.still_costs()}
     if len(parts) < 2 or parts[0] != "songs":
         raise HttpError(404, "Not found")
@@ -130,7 +130,7 @@ def route(method, path, q, body, h):
 
     if key == ("PUT", "setup"):
         with song.lock:
-            for f in ("title", "style", "llm_model", "image_model", "video_model", "video_resolution"):
+            for f in ("title", "style", "transcribe_model", "llm_model", "image_model", "video_model", "video_resolution"):
                 if f in body:
                     song.meta[f] = body[f].strip()
             if "timing_locked" in body:
