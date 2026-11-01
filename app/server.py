@@ -99,6 +99,41 @@ def renumber(sections):
     return stills, clips, still_map
 
 
+def joined_prompts(sections, static):
+    """One section's text from several, in order, so a merge loses nothing.
+    Ask for a change can then rewrite it as one shot."""
+    def uniq(field, among=sections):
+        out = []
+        for s in among:
+            t = s[field].strip()
+            if t and t not in out:
+                out.append(t)
+        return out
+    moving = [s for s in sections if not s["static"]]
+    motions = uniq("video_prompt", moving)
+    if static:
+        motion = sections[0]["video_prompt"]
+    elif len(motions) > 1:
+        motion = "\n".join(f"{'First' if n == 0 else 'Then'}: {m}" for n, m in enumerate(motions))
+    else:
+        motion = "".join(motions)
+    edited = {}
+    for s in sections:
+        edited.update({k: v for k, v in s["edited"].items() if v})
+    shared = set(sections[0]["refs"]["off"])   # still off only if off everywhere
+    for s in sections[1:]:
+        shared &= set(s["refs"]["off"])
+    added, seen = [], set()
+    for s in sections:
+        for r in s["refs"]["add"]:
+            if r["file"] not in seen:
+                seen.add(r["file"])
+                added.append(r)
+    return {"beat": " ".join(uniq("beat")), "image_prompt": "\n\n".join(uniq("image_prompt")),
+            "video_prompt": motion, "extra": "\n".join(uniq("extra")), "edited": edited,
+            "refs": {"off": sorted(shared), "add": added}}
+
+
 # ================================================================== routes
 
 def route(method, path, q, body, h):
@@ -290,13 +325,15 @@ def route(method, path, q, body, h):
             first = chosen[0]
             stills, clips, still_map = renumber(chosen)
             merged = json.loads(json.dumps(first))
+            static = all(s["static"] for s in chosen)
             merged.update(uid=uid(), end=chosen[-1]["end"], stills=stills, clips=clips, clip=None,
-                          still=still_map.get((first["uid"], first["still"])), use_stale=False, failed=None,
-                          static=all(s["static"] for s in chosen),
-                          kind="lyric" if any(s["kind"] == "lyric" for s in chosen) else "gap")
+                          still=next((still_map[(s["uid"], s["still"])] for s in chosen if s["still"] is not None), None), use_stale=False, failed=None,
+                          static=static, kind="lyric" if any(s["kind"] == "lyric" for s in chosen) else "gap",
+                          **json.loads(json.dumps(joined_prompts(chosen, static))))
             song.plan[idx[0]: idx[-1] + 1] = [merged]
             song.save_plan()
-        return {**state(song), "selected": merged["uid"]}
+            joined = any(len({s[f].strip() for s in chosen if s[f].strip()}) > 1 for f in ("image_prompt", "video_prompt"))
+        return {**state(song), "selected": merged["uid"], "joined": joined}
 
     if key == ("POST", "retime"):
         if song.meta["timing_locked"]:

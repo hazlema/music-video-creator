@@ -50,7 +50,7 @@ async function act(fn) {
 const S = {
   view: "library", slug: null, tab: "timeline", st: null, peaks: null,
   pps: 40, sel: [], anchor: null, t: 0, playing: false, previewMode: "clips",
-  drafts: {}, proposal: null, drag: null, est: {}, seenTasks: {}, inspKey: "", setupDraft: {}, busy: null,
+  drafts: {}, proposal: null, drag: null, est: {}, estSig: {}, seenTasks: {}, inspKey: "", setupDraft: {}, busy: null,
 };
 const audio = new Audio();
 audio.preload = "auto";
@@ -163,7 +163,7 @@ async function openSong(slug, tab) {
   const fresh = S.slug !== slug || S.view !== "song";
   S.view = "song";
   if (fresh) {
-    Object.assign(S, { slug, sel: [], anchor: null, t: 0, drafts: {}, setupDraft: {}, proposal: null, est: {}, peaks: null, seenTasks: {}, inspKey: "" });
+    Object.assign(S, { slug, sel: [], anchor: null, t: 0, drafts: {}, setupDraft: {}, proposal: null, est: {}, estSig: {}, peaks: null, seenTasks: {}, inspKey: "" });
     audio.pause();
     S.playing = false;
   }
@@ -190,6 +190,10 @@ function setState(st) {
     api("GET", `songs/${S.slug}/peaks`).then((p) => { S.peaks = p; S.pps = fitPps(); update(); });
   }
   S.sel = S.sel.filter((id) => secById(id));
+  for (const id in S.estSig) {
+    const s = secById(id);
+    if (!s || estSig(s) !== S.estSig[id]) { delete S.est[id]; delete S.estSig[id]; }
+  }
   update();
 }
 
@@ -936,7 +940,15 @@ function renderToolbar() {
   $$("[data-z]").forEach((b) => (b.onclick = () => b.dataset.z === "fit" ? (S.pps = fitPps(), renderTimeline()) : zoomAt(b.dataset.z === "in" ? 1.5 : 1 / 1.5)));
   $("#tbLock").onchange = (e) => act(async () => { setState(await api("PUT", `songs/${S.slug}/setup`, { timing_locked: e.target.checked })); renderTimeline(); });
   $("#tbSplit").onclick = () => openSplit(one.uid);
-  $("#tbMerge").onclick = () => act(async () => { const r = await api("POST", `songs/${S.slug}/merge`, { uids: S.sel }); S.sel = [r.selected]; setState(r); toast("Merged."); });
+  $("#tbMerge").onclick = () => act(async () => {
+    const r = await api("POST", `songs/${S.slug}/merge`, { uids: S.sel });
+    S.sel = [r.selected];
+    setState(r);
+    // The merged section holds every shot's prompts one after another; offer
+    // to have them rewritten as one shot (Cancel keeps the joined text).
+    if (r.joined) openChange([r.selected], MERGE_ASK, "Merged. The prompts were joined in order; ask for a rewrite, or Cancel to keep them as they are.");
+    else toast("Merged.");
+  });
   $("#tbApprove").onclick = () => approve(S.sel);
   $("#tbRegen").onclick = () => generateStills(S.sel);
   $("#tbAnimate").onclick = () => openAnimate(S.sel);
@@ -1187,9 +1199,23 @@ function diff(a, b) {
   return out;
 }
 
+// Whether a section can animate, and what it costs, depends on these. When any
+// of them change (approving, a new still, a finished job...) the cached answer
+// is dropped and fetched again.
+function estSig(s) {
+  const m = S.st.meta;
+  return JSON.stringify([s.status, s.approved, s.still, s.static, s.start, s.end, s.job?.state, s.clips.length, m.video_model, m.video_resolution]);
+}
+
 function loadEstimate(id) {
+  const sig = estSig(secById(id));
   S.est[id] = null;
-  api("GET", `songs/${S.slug}/estimate?uids=${id}`).then((r) => { S.est[id] = r.rows[0] || null; renderInspector(); }).catch(() => {});
+  S.estSig[id] = sig;
+  api("GET", `songs/${S.slug}/estimate?uids=${id}`).then((r) => {
+    if (S.estSig[id] !== sig) return;   // the section changed while this was asked
+    S.est[id] = r.rows[0] || null;
+    renderInspector();
+  }).catch(() => {});
 }
 
 function patchSection(id, body) {
@@ -1290,7 +1316,9 @@ async function applyProposal(id, regen) {
 // Type what you want ("the fence should be red"); the storyboard model merges it
 // into the existing prompts with the smallest edit, and you accept the diff.
 // Polish is the separate, opt-in rewrite. Nothing here generates a still.
-async function openChange(uids) {
+const MERGE_ASK = "This section was merged from several shots, so its scene and motion describe them one after another. Rewrite them as one shot that covers the whole section, keeping the characters, setting and the key moments.";
+
+async function openChange(uids, preset = "", lead = "") {
   for (const id of uids) if (S.drafts[id] && Object.keys(S.drafts[id]).length) await saveDrafts(id);
   const secs = uids.map(secById).filter(Boolean);
   const open = secs.filter((s) => !s.locked);
@@ -1300,12 +1328,12 @@ async function openChange(uids) {
   const scope = open.length === 1
     ? `${tc(open[0].start)} · ${esc(captionText(open[0].start, open[0].end) || "Instrumental")}`
     : `${open.length} sections, ${tc(open[0].start)} – ${tc(open[open.length - 1].end)}`;
-  const C = { text: "", polish: false, result: null, accept: {} };
+  const C = { text: preset, polish: false, result: null, accept: {} };
 
   const compose = () => {
     dlg.innerHTML = `
       <div class="dh"><h2>Ask for a change</h2><p class="muted small" style="margin:4px 0 0">${scope}${locked ? ` · ${locked} locked section${locked > 1 ? "s" : ""} skipped` : ""}</p></div>
-      <div class="db">
+      <div class="db">${lead ? `<p class="small" style="margin-top:0">${esc(lead)}</p>` : ""}
         <textarea id="chText" rows="3" class="ask-box" placeholder="e.g. the fence should be red · make it night · the dragon wears the apron">${esc(C.text)}</textarea>
         <p class="muted small">Only what you ask for changes; the rest of the prompt is kept word for word. <b>Polish wording</b> rewrites the prompts more freely without changing what's in them, and also applies anything you type here.</p>
       </div>
