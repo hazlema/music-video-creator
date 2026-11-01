@@ -133,6 +133,10 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 8790
     torch.set_num_threads(max(4, (os.cpu_count() or 8) // 2))
+    from huggingface_hub import try_to_load_from_cache
+    if not isinstance(try_to_load_from_cache(MODEL, "model_index.json"), str):
+        print(f"First run: downloading {MODEL} (about 15 GB) into the Hugging Face cache. "
+              f"This happens once; later starts take a few seconds.", flush=True)
     print(f"Loading {MODEL}...", flush=True)
     pipe = load(offload="--offload" in sys.argv)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)

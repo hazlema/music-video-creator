@@ -31,7 +31,7 @@ DEFAULTS = {
     "transcribe_model": "elevenlabs/scribe-v2",
     "llm_model": "anthropic/claude-sonnet-5.5",
     "image_model": "google/gemini-nano-banana-2.1",
-    "video_model": "x-ai/grok-imagine-video-1.5",
+    "video_model": "x-ai/grok-imagine-video-1.5-lite",   # $0.02/s at 480p; full 1.5 is $0.08/s
     "video_resolution": "480p",
     "timing_locked": True,   # section edges can't be dragged until unticked
     "spend": [],
