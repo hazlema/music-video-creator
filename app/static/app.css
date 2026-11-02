@@ -63,7 +63,8 @@ textarea { resize: vertical; min-height: 64px; line-height: 1.5; }
 textarea:focus, input:focus, select:focus { border-color: var(--wave-dim); outline: none; }
 .check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .check input { accent-color: var(--amber); }
-.check.continue { margin-top: 10px; }
+.btn.soft-off { opacity: .5; }
+.lastframe { display: block; width: 100%; border-radius: 6px; margin-bottom: 10px; }
 .muted { color: var(--muted); }
 .small { font-size: 12.5px; }
 
@@ -83,6 +84,17 @@ textarea:focus, input:focus, select:focus { border-color: var(--wave-dim); outli
 .song-grid a:hover .cover img { transform: scale(1.03); }
 .song-grid .cover i { color: var(--muted); font-size: 12px; font-style: normal; }
 .song-grid .t { font-size: 17px; font-weight: 600; font-stretch: 105%; line-height: 1.25; }
+.song-grid li { position: relative; }
+.song-gear { position: absolute; top: 6px; right: 6px; z-index: 2; width: 30px; height: 30px; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: rgba(15, 19, 26, .72); color: var(--text); cursor: pointer; opacity: .75; transition: opacity .15s, background .15s; }
+.song-grid li:hover .song-gear, .song-gear:focus-visible, .song-gear[aria-expanded=true] { opacity: 1; }
+.song-gear:hover { background: rgba(15, 19, 26, .92); }
+.song-gear:focus-visible { outline: 2px solid var(--amber); }
+.song-menu { position: absolute; top: 40px; right: 6px; z-index: 3; display: flex; flex-direction: column; min-width: 130px; padding: 4px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-s); box-shadow: 0 8px 24px rgba(0, 0, 0, .4); }
+.song-menu button { text-align: left; padding: 7px 10px; border: 0; background: none; color: var(--text); font: inherit; font-size: 14px; border-radius: 3px; cursor: pointer; }
+.song-menu button:hover, .song-menu button:focus-visible { background: var(--panel); outline: none; }
+.song-menu button.danger { color: var(--coral); }
 .new-song { display: flex; gap: 8px; max-width: 460px; }
 
 /* ---------------------------------------------------------------- shell */

@@ -16,6 +16,7 @@ import json
 import math
 import re
 import secrets
+import subprocess
 import threading
 import time
 import wave
@@ -228,6 +229,8 @@ _songs_lock = threading.Lock()
 
 def get(slug):
     with _songs_lock:
+        if slug in _songs and not _songs[slug].dir.is_dir():
+            del _songs[slug]   # the folder was moved or deleted outside the app
         if slug not in _songs:
             if not re.fullmatch(r"[a-z0-9-]+", slug) or not (SONGS / slug).is_dir():
                 raise KeyError(f"No song {slug}")
@@ -235,12 +238,49 @@ def get(slug):
         return _songs[slug]
 
 
-def create(title):
-    SONGS.mkdir(exist_ok=True)
+def free_slug(title, keep=None):
+    """A folder name for this title that isn't taken (keep: the song's own)."""
     base = slugify(title)
     slug, n = base, 2
-    while (SONGS / slug).exists():
+    while slug != keep and (SONGS / slug).exists():
         slug, n = f"{base}-{n}", n + 1
+    return slug
+
+
+def rename(song, title):
+    """New title, and the folder renamed to match. The caller checks that
+    nothing is running for the song."""
+    title = title.strip()
+    if not title:
+        raise ValueError("Give the song a name.")
+    with _songs_lock, song.lock:
+        slug = free_slug(title, keep=song.slug)
+        if slug != song.slug:
+            song.dir.rename(SONGS / slug)
+            _songs.pop(song.slug, None)
+            song.slug, song.dir = slug, SONGS / slug
+            _songs[slug] = song
+        song.meta["title"] = title
+        song.save_meta()
+    return song
+
+
+def delete(song):
+    """Move the song's folder to the desktop Trash (or songs/.trash when
+    there's no Trash), so a mistake can be undone."""
+    with _songs_lock, song.lock:
+        try:
+            subprocess.run(["gio", "trash", str(song.dir)], check=True, capture_output=True)
+        except (OSError, subprocess.CalledProcessError):
+            trash = SONGS / ".trash"
+            trash.mkdir(exist_ok=True)
+            song.dir.rename(trash / f"{song.slug}-{int(time.time())}")
+        _songs.pop(song.slug, None)
+
+
+def create(title):
+    SONGS.mkdir(exist_ok=True)
+    slug = free_slug(title)
     d = SONGS / slug
     for sub in ("refs", "stills", "raw", "export"):
         (d / sub).mkdir(parents=True)

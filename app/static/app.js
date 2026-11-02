@@ -87,7 +87,8 @@ async function openLibrary() {
     <h1>Songs into music videos</h1>
     <p class="lede">Each song gets a timeline: timed lyrics, a storyboard, a still for every shot, then a clip for every still you approve.</p>
     ${list.length ? `<ul class="song-grid">${list.map((s) => `
-      <li><a href="#/song/${s.slug}">
+      <li><button class="song-gear" data-gear="${s.slug}" aria-label="Rename or delete ${esc(s.title)}" aria-haspopup="menu" title="Rename or delete">${GEAR}</button>
+        <a href="#/song/${s.slug}">
         <span class="cover">${s.cover ? `<img src="${`/api/songs/${s.slug}/file/${s.cover}`}" alt="" loading="lazy">` : `<i>No stills yet</i>`}</span>
         <span class="t">${esc(s.title)}</span>
         <span class="muted small">${esc(s.stage)}${s.sections ? ` · ${s.sections} sections` : ""}${s.length ? ` · ${tcShort(s.length)}` : ""}</span>
@@ -98,11 +99,54 @@ async function openLibrary() {
       <button class="btn primary">New song</button>
     </form>
   </main>`;
+  $$("[data-gear]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); songMenu(b, list.find((x) => x.slug === b.dataset.gear)); }));
   $("#newSong").onsubmit = (e) => {
     e.preventDefault();
     act(async () => {
       const r = await api("POST", "songs", { title: e.target.title.value });
       location.hash = `#/song/${r.slug}/setup`;
+    });
+  };
+}
+
+const GEAR = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+
+// The gear on a song's picture: rename it (title and folder) or delete it.
+// Both go through the app so it doesn't lose track of the folder.
+function songMenu(btn, song) {
+  const open = $(".song-menu");
+  open?.remove();
+  $$("[data-gear]").forEach((g) => g.setAttribute("aria-expanded", "false"));
+  if (open?.dataset.slug === song.slug) return;   // a second click closes it
+  const m = document.createElement("div");
+  m.className = "song-menu";
+  m.dataset.slug = song.slug;
+  m.setAttribute("role", "menu");
+  m.innerHTML = `<button role="menuitem" data-m="rename">Rename…</button><button role="menuitem" class="danger" data-m="delete">Delete…</button>`;
+  btn.after(m);
+  btn.setAttribute("aria-expanded", "true");
+  const close = () => { m.remove(); btn.setAttribute("aria-expanded", "false"); document.removeEventListener("click", away); document.removeEventListener("keydown", esc_); };
+  const away = (e) => { if (!m.contains(e.target)) close(); };
+  const esc_ = (e) => { if (e.key === "Escape") { close(); btn.focus(); } };
+  setTimeout(() => { document.addEventListener("click", away); document.addEventListener("keydown", esc_); });
+  m.querySelector("button").focus();
+  $("[data-m=rename]", m).onclick = () => {
+    close();
+    const title = prompt("New name for this song. Its folder is renamed to match.", song.title);
+    if (!title?.trim() || title.trim() === song.title) return;
+    act(async () => {
+      const r = await api("POST", `songs/${song.slug}/rename`, { title: title.trim() });
+      await openLibrary();
+      toast(`Renamed. The folder is now songs/${r.slug}.`);
+    });
+  };
+  $("[data-m=delete]", m).onclick = () => {
+    close();
+    if (!confirm(`Delete "${song.title}"? Its folder, with every still, clip and export, goes to your system Trash, so you can still get it back from there.`)) return;
+    act(async () => {
+      await api("DELETE", `songs/${song.slug}`);
+      await openLibrary();
+      toast(`Deleted "${song.title}". It's in your Trash.`);
     });
   };
 }
@@ -419,9 +463,10 @@ function renderSetup() {
     </div>
     <div>
       <h2>Look</h2>
-      <div class="brief"><label class="field"><span>Brief: the video's premise, its look and mood, a recurring motif, how the mood changes. All optional.</span>
+      <div class="brief"><label class="field"><span>Instructions for the storyboard generation: the premise, look and mood, a recurring motif, rules like "don't describe the location". Used when prompts are written, so rewrite them after changing this.</span>
         <textarea id="fBrief">${esc(setupVal("brief"))}</textarea></label></div>
-      <label class="field"><span>Style line, added to every shot's image prompt</span><input type="text" id="fStyle" value="${esc(setupVal("style"))}" placeholder="e.g. 35mm film, muted teal and rust grade, soft grain"></label>
+      <div class="brief"><label class="field"><span>Sent with every still generation (include @refs here). Applies from the next still, no rewrite needed.</span>
+        <textarea id="fStyle" placeholder="e.g. 35mm film, muted teal and rust grade, soft grain. She walks through @city.">${esc(setupVal("style"))}</textarea></label></div>
       <h2 style="margin-top:22px">Global references</h2>
       <p class="muted small" style="margin-top:-6px">Characters, places and props every shot uses. Name each one the way the storyboard should refer to it. You can switch any of them off per section.</p>
       <div class="refs-grid">${m.refs.map((r) => `
@@ -932,7 +977,7 @@ function updateScreen(force) {
     }
   }
   if (clip) {
-    const want = S.t - s.start;
+    const want = S.t - s.start + (s.lead || 0);   // skips a repeated opening frame (see clip_lead)
     if (!vid.duration || want <= vid.duration) {
       if (Math.abs(vid.currentTime - want) > 0.3 || !S.playing) { try { vid.currentTime = want; } catch (_) {} }
     }
@@ -1054,6 +1099,34 @@ async function openRegenWith(uids) {
   dlg.showModal();
 }
 
+// "Copy previous last frame": why it can't be used yet, or null when it can.
+function lastFrameWhy(s) {
+  const prev = plan()[plan().indexOf(s) - 1];
+  if (!prev) return "This is the first section, so there's no previous frame to copy.";
+  if (prev.static) return prev.still === null ? "The previous section is static but has no still yet. Generate it first." : null;
+  return prev.clip === null ? "The previous section has no clip yet. Animate it first, or make it static." : null;
+}
+
+async function openLastFrame(id) {
+  const why = lastFrameWhy(secById(id));
+  if (why) return toast(why, true);
+  const r = await act(() => api("GET", `songs/${S.slug}/sections/${id}/last-frame`));
+  if (!r) return;
+  const prev = secById(r.source.uid), dlg = $("#dlg");
+  dlg.innerHTML = `
+    <div class="dh"><h2>Copy previous last frame</h2>
+      <p class="muted small" style="margin:4px 0 0">${"clip" in r.source ? `The last frame shown of clip ${r.source.clip}` : `Still ${r.source.still}`} from the section at ${tc(prev.start)}.</p></div>
+    <div class="db"><img class="lastframe" src="${fileUrl(r.file)}?${Date.now()}" alt="The previous section's last frame">
+      <p class="small"><b>Add as reference:</b> your next Generate still redraws this shot to match the frame, so it can move on to its own framing and action. Costs one still.</p>
+      <p class="small"><b>Use as the still:</b> the frame becomes this section's still as it is, free. The clip starts exactly where the previous one ended, but from the same moment and framing.</p></div>
+    <div class="df"><button class="btn quiet" id="lfCancel">Cancel</button><button class="btn" id="lfRef">Add as reference</button><button class="btn primary" id="lfStill">Use as the still</button></div>`;
+  const go = (use) => { dlg.close(); act(async () => { setState(await api("POST", `songs/${S.slug}/sections/${id}/last-frame`, { use })); toast(use === "ref" ? "Added to this section's references. Generate a still to use it." : "Copied in as the still. Approve it to animate."); }); };
+  $("#lfCancel").onclick = () => dlg.close();
+  $("#lfRef").onclick = () => go("ref");
+  $("#lfStill").onclick = () => go("still");
+  dlg.showModal();
+}
+
 function writeStoryboard() {
   const redo = plan().some((s) => s.image_prompt);
   if (redo && !confirm("Rewrite the storyboard for every unlocked section? Beats and prompts you edited by hand are kept, and no stills are generated.")) return;
@@ -1086,9 +1159,7 @@ function renderInspector() {
   const busy = running("still", s.uid);
   const lyric = captionText(s.start, s.end);
   const lock = s.locked ? "disabled" : "";
-  // "Continue from last clip": the still is made from the previous section's last frame.
-  const prev = plan()[plan().indexOf(s) - 1];
-  const prevReady = prev && (prev.static ? prev.still !== null : prev.clip !== null);
+  const lastWhy = lastFrameWhy(s);
   const est = S.est[s.uid];
   const clipReady = est && est.status === "ready";
 
@@ -1109,11 +1180,10 @@ function renderInspector() {
     <div class="actions">
       <button class="btn primary" id="iRegen" ${busy || s.locked ? "disabled" : ""}>${busy ? "Generating…" : s.stills.length ? "Regenerate still" : "Generate still"}</button>
       <button class="btn" id="iRegenWith" ${busy || s.locked ? "disabled" : ""}>${s.stills.length ? "Regenerate" : "Generate"} with…</button>
+      <button class="btn ${lastWhy ? "soft-off" : ""}" id="iLastFrame" ${s.locked ? "disabled" : ""}
+        title="${esc(lastWhy || "Carry on from the end of the previous section's clip: add its last frame as a reference, or use it as this still.")}">Copy previous last frame…</button>
       ${dirty ? `<span class="muted small" style="align-self:center">Uses the saved prompt. Save first to use your edits.</span>` : ""}
     </div>
-    <label class="check small continue" title="New stills for this section are made from the last frame of the previous section's clip, so the shot carries on from it. The previous clip has to exist first.">
-      <input type="checkbox" id="iContinue" ${s.continue_last ? "checked" : ""} ${prev && !s.locked ? "" : "disabled"}> Continue from last clip</label>
-    ${s.continue_last && !prevReady ? `<span class="muted small">${prev?.static ? "Generate the previous section's still first." : "Animate the previous section first."}</span>` : ""}
   </div>
 
   ${s.static ? "" : `<div class="block">
@@ -1153,7 +1223,7 @@ function renderInspector() {
       return `<div class="ref-row ${off ? "off" : ""}"><img src="${fileUrl("refs/" + r.file)}" alt=""><span class="lbl">${esc(r.label)}</span>
         <label class="check small"><input type="checkbox" data-ref-on="${r.id}" ${off ? "" : "checked"} ${lock}> Use</label></div>`;
     }).join("") : `<p class="muted small">No global references. Add them in Setup.</p>`}
-    ${s.refs.add.map((r) => `<div class="ref-row"><img src="${fileUrl("refs/" + r.file)}" alt=""><span class="lbl">${esc(r.label)} <span class="muted small">this section only</span></span>
+    ${s.refs.add.map((r) => `<div class="ref-row"><img src="${fileUrl("refs/" + r.file)}" alt=""><span class="lbl">${r.last ? "Previous section's last frame" : esc(r.label)} <span class="muted small">this section only</span></span>
       <button class="btn small quiet" data-ref-rm="${r.id}" ${lock}>Remove</button></div>`).join("")}
     <div class="actions"><button class="btn small" id="iAddRef" ${lock}>Add a reference for this section</button><input type="file" id="iRefFile" accept="image/png,image/jpeg,image/webp" hidden></div>
   </div>
@@ -1193,6 +1263,10 @@ function notices(s) {
   if (s.job?.state === "unknown") out.push(`<div class="notice nt-failed"><b>Clip job unknown.</b> ${esc(s.job.error || "")} The request may or may not have reached the provider, so it isn't resent automatically.
     <div class="actions"><button class="btn small" id="iMarkFailed">Mark failed</button></div></div>`);
   else if (s.job) out.push(`<div class="notice">Clip rendering (${s.job.seconds} s). This usually takes a minute or two.</div>`);
+  if (s.last_moved) out.push(`<div class="notice nt-stale"><b>Previous section changed.</b> Its last frame was copied into this section before the change, so the two shots may no longer line up.
+    <div class="actions"><button class="btn small" data-last-again>Copy previous last frame…</button></div></div>`);
+  if (s.continue_last) out.push(`<div class="notice">Continue from last clip is on (the old checkbox). The next still copies the previous section's last frame in as a reference.
+    <div class="actions"><button class="btn small" data-continue-off>Turn off</button></div></div>`);
   if (s.stale) out.push(`<div class="notice nt-stale"><b>Clip out of date.</b> The still changed after this clip was made, or the section is now longer than the clip. Re-roll it, or export will use the still.</div>`);
   if (s.low) {
     const idx = S.st.lines.map((l, i) => (l.low && !l.confirmed && l.start < s.end && l.end > s.start ? i : -1)).filter((i) => i >= 0);
@@ -1279,7 +1353,8 @@ function bindInspector(s) {
   }));
   $$("[data-confirm-lines]", el).forEach((b) => (b.onclick = () => confirmLines(b.dataset.confirmLines.split(",").map(Number))));
   $("#iApproved").onchange = (e) => approve([id], e.target.checked);
-  $("#iContinue").onchange = (e) => patchSection(id, { continue_last: e.target.checked });
+  $$("#iLastFrame, [data-last-again]", el).forEach((b) => (b.onclick = () => openLastFrame(id)));
+  $("[data-continue-off]", el) && ($("[data-continue-off]", el).onclick = () => patchSection(id, { continue_last: false }));
   $("#iRegenWith").onclick = () => (s.image_prompt.trim() ? openRegenWith([id]) : $("#iRegen").click());
   $("#iRegen").onclick = () => {
     if (!s.image_prompt.trim()) return toast(plan().some((x) => x.image_prompt)

@@ -493,41 +493,122 @@ CONTINUE_NOTE = (f"This shot continues straight on from the reference image of {
 
 
 def last_frame(song, s):
-    """For "Continue from last clip": the final frame the viewer sees of the
+    """For "Copy previous last frame": the final frame the viewer sees of the
     section before s (its clip trimmed to the section, as export does), saved as
     refs/last-<uid>.png. Returns (path, where it came from)."""
     prev, _ = song.neighbours(s)
     if not prev:
-        raise ValueError("Continue from last clip is on, but this is the first section.")
+        raise ValueError("This is the first section, so there's no previous frame to copy.")
     if prev["static"]:   # a static section is its still for its whole length
         if prev["still"] is None:
-            raise ValueError("Continue from last clip is on, but the previous section has no still yet.")
+            raise ValueError("The previous section is static but has no still yet. Generate it first.")
         v = next(v for v in prev["stills"] if v["n"] == prev["still"])
         return song.dir / "stills" / v["file"], {"uid": prev["uid"], "still": prev["still"]}
     c = _clip(prev, prev["clip"]) if prev["clip"] is not None else None
     if not c:
-        raise ValueError("Continue from last clip is on, but the previous section has no clip yet. Animate it first.")
+        raise ValueError("The previous section has no clip yet. Animate it first, or make it static.")
     out = song.dir / "refs" / f"last-{s['uid']}.png"
     out.parent.mkdir(exist_ok=True)
     # Read only as much of the clip as the section shows; -update keeps
     # overwriting the image, so what's left is the last frame shown.
-    subprocess.run([ffmpeg(), "-y", "-loglevel", "error", "-t", f"{section_length(prev):.3f}",
+    subprocess.run([ffmpeg(), "-y", "-loglevel", "error", "-ss", f"{clip_lead(song, prev, c):.3f}",
+                    "-t", f"{section_length(prev):.3f}",
                     "-i", str(song.dir / "raw" / c["file"]), "-an", "-update", "1", str(out)], check=True)
     return out, {"uid": prev["uid"], "clip": c["n"]}
 
 
+def copy_last_frame(song, s, use):
+    """Copy the previous section's last frame into s, either as a reference for
+    its next stills (use="ref", replacing an earlier copy) or as a new still
+    version (use="still"), so the clip carries straight on. Call with the lock held."""
+    frame, src = last_frame(song, s)
+    if use == "ref":
+        rid = uid()
+        shutil.copyfile(frame, song.dir / "refs" / f"{rid}{frame.suffix}")
+        s["refs"]["add"] = [r for r in s["refs"]["add"] if not r.get("last")]
+        s["refs"]["add"].insert(0, {"id": rid, "file": f"{rid}{frame.suffix}", "label": LAST_LABEL, "last": src})
+    elif use == "still":
+        n = max([v["n"] for v in s["stills"]], default=0) + 1
+        name = f"{s['uid']}-v{n}{frame.suffix}"
+        (song.dir / "stills").mkdir(exist_ok=True)
+        shutil.copyfile(frame, song.dir / "stills" / name)
+        s["stills"].append({"n": n, "file": name, "prompt": "", "model": "previous last frame", "cost": 0,
+                            "at": time.time(), "after": src})
+        select_still(s, n)
+    else:
+        raise ValueError("Say whether to use the frame as a reference or as the still.")
+    s["continue_last"] = False   # the old checkbox; the copy replaces it
+    song.save_plan()
+
+
+LEAD_MAX = FPS // 2   # never skip more than half a second
+
+
+def _held_frames(path):
+    """How many opening frames (at FPS) a clip spends on its first image
+    before it really starts moving: at least 1, at most LEAD_MAX."""
+    r = subprocess.run([ffmpeg(), "-v", "error", "-t", "1", "-i", str(path), "-vf", f"fps={FPS},scale=64:36,format=gray",
+                        "-f", "rawvideo", "-"], capture_output=True, check=True)
+    a = np.frombuffer(r.stdout, np.uint8).reshape(-1, 36, 64).astype(np.int16)
+    for i in range(1, min(len(a), LEAD_MAX + 1)):
+        if np.abs(a[i] - a[i - 1]).mean() >= 1.2:   # grey levels per pixel; below this it looks frozen
+            return max(1, i)
+    return min(LEAD_MAX, max(1, len(a) - 1))
+
+
+def clip_lead(song, s, c):
+    """Seconds to skip at the start of clip c. Only for clips animated from a
+    copied last frame: their first frames repeat the previous clip's last one,
+    which shows as a stutter at the cut. Cached on the clip. Call with the lock held."""
+    v = next((v for v in s["stills"] if v["n"] == c.get("still")), None)
+    if not v or v.get("model") != "previous last frame":
+        return 0
+    if "lead" not in c:
+        try:
+            c["lead"] = round(_held_frames(song.dir / "raw" / c["file"]) / FPS, 3)
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            return 1 / FPS
+        song.save_plan()
+    return c["lead"]
+
+
+def last_frame_moved(song, s):
+    """True when the previous section has changed since its last frame was
+    copied into s (as a reference, or as the current still)."""
+    srcs = [r["last"] for r in s["refs"]["add"] if r.get("last")]
+    cur = next((v for v in s["stills"] if v["n"] == s["still"]), None)
+    if cur and cur.get("model") == "previous last frame" and cur.get("after"):
+        srcs.append(cur["after"])
+    if not srcs:
+        return False
+    prev, _ = song.neighbours(s)
+    for src in srcs:
+        if not prev or prev["uid"] != src["uid"]:
+            return True
+        if "clip" in src and (prev["static"] or prev["clip"] != src["clip"]):
+            return True
+        if "still" in src and (not prev["static"] or prev["still"] != src["still"]):
+            return True
+    return False
+
+
 def still_refs(song, s):
     out = []
+    for r in s["refs"]["add"]:   # the copied last frame goes first
+        if r.get("last"):
+            out.append((r["label"], song.dir / "refs" / r["file"]))
     for r in song.meta["refs"]:
         if r["id"] not in s["refs"]["off"]:
             out.append((r["label"], song.dir / "refs" / r["file"]))
     for r in s["refs"]["add"]:
-        out.append((r["label"], song.dir / "refs" / r["file"]))
+        if not r.get("last"):
+            out.append((r["label"], song.dir / "refs" / r["file"]))
     return out
 
 
 def still_prompt(song, s):
-    parts = [(CONTINUE_NOTE if s.get("continue_last") else "") + s["image_prompt"].strip()]
+    after = any(r.get("last") for r in s["refs"]["add"])
+    parts = [(CONTINUE_NOTE if after else "") + s["image_prompt"].strip()]
     if s["extra"].strip():
         parts.append(s["extra"].strip())
     if song.meta["style"].strip():
@@ -545,12 +626,11 @@ def make_still(song, sid, task, model=None, quality=None):
         s = song.section(sid)
         if not s["image_prompt"].strip():
             raise ValueError("This section has no image prompt yet. Run the storyboard or write one.")
+        if s.get("continue_last"):   # the old checkbox: copy the frame in now
+            copy_last_frame(song, s, "ref")
         prompt = still_prompt(song, s)
         refs = still_refs(song, s)
-        after = None
-        if s.get("continue_last"):
-            frame, after = last_frame(song, s)
-            refs.insert(0, (LAST_LABEL, frame))
+        after = next((r["last"] for r in s["refs"]["add"] if r.get("last")), None)
         if model:
             quality = quality or ""
         else:
@@ -849,13 +929,14 @@ def _srt(lines):
     return "\n".join(f"{n}\n{t(l['start'])} --> {t(l['end'])}\n{l['text']}\n" for n, l in enumerate(lines, 1))
 
 
-def _render(src, kind, dest, dur, ass=None):
+def _render(src, kind, dest, dur, ass=None, lead=0):
     frames = max(1, round(dur * FPS))
     base = [ffmpeg(), "-y", "-hide_banner", "-loglevel", "error"]
     if kind == "clip":
         inp = ["-i", str(src)]
         vf = (f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps={FPS},"
-              f"tpad=stop_mode=clone:stop_duration={dur + 1},trim=end_frame={frames},setpts=PTS-STARTPTS")
+              + (f"trim=start_frame={round(lead * FPS)},setpts=PTS-STARTPTS," if lead else "")
+              + f"tpad=stop_mode=clone:stop_duration={dur + 1},trim=end_frame={frames},setpts=PTS-STARTPTS")
     elif kind == "still":
         # Slow push-in so a held still doesn't look frozen.
         inp = ["-loop", "1", "-framerate", str(FPS), "-i", str(src)]
@@ -878,6 +959,7 @@ def export(song, task, use_stale=()):
             s["use_stale"] = s["uid"] in use_stale
         song.save_plan()
         rows = {r["uid"]: r for r in plan_export(song)}
+        leads = {s["uid"]: clip_lead(song, s, _clip(s, s["clip"])) for s in song.plan if rows[s["uid"]]["use"] == "clip"}
         plan = [dict(s) for s in song.plan]
         lines = [dict(l) for l in song.lines]
         length = song.length
@@ -917,8 +999,9 @@ def export(song, task, use_stale=()):
             ass = Path(tmp) / f"{n}.ass"
             ass.write_text(_ass(lines, _frames(p["start"]) / FPS, _frames(p["end"]) / FPS))
             clean, captioned = out / "clean" / f"{p['id']}.mp4", out / "clips" / f"{p['id']}.mp4"
-            _render(src, p["use"], clean, dur)
-            _render(src, p["use"], captioned, dur, ass)
+            lead = leads.get(p["s"]["uid"], 0) if p["use"] == "clip" else 0
+            _render(src, p["use"], clean, dur, lead=lead)
+            _render(src, p["use"], captioned, dur, ass, lead=lead)
             concat.append(captioned)
 
         task["msg"] = "Joining pieces and adding the song"

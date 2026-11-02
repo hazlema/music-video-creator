@@ -52,6 +52,8 @@ def section_view(song, s, low_lines, limit):
     else:
         status = "approved" if s["approved"] else "draft"
     return {**s, "status": status, "stale": stale, "split_needed": split, "low": low,
+            "last_moved": pipeline.last_frame_moved(song, s),
+            "lead": pipeline.clip_lead(song, s, c) if (c := pipeline._clip(s, s["clip"]) if s["clip"] is not None else None) else 0,
             "job": {k: active[k] for k in ("jid", "state", "error", "seconds", "created")} if active else None,
             "clip_count": len(s["clips"])}
 
@@ -124,8 +126,10 @@ def joined_prompts(sections, static):
     for s in sections[1:]:
         shared &= set(s["refs"]["off"])
     added, seen = [], set()
-    for s in sections:
+    for k, s in enumerate(sections):
         for r in s["refs"]["add"]:
+            if k and r.get("last"):
+                continue   # only the first section's copied frame follows on from the section before
             if r["file"] not in seen:
                 seen.add(r["file"])
                 added.append(r)
@@ -171,6 +175,17 @@ def route(method, path, q, body, h):
     key = (method, rest[0] if rest else "")
 
     if key == ("GET", ""):
+        return state(song)
+    if key in (("POST", "rename"), ("DELETE", "")):
+        busy = [(t["label"] or t["kind"]).lower() for t in tasks.for_song(song.slug) if t["state"] == "running"]
+        busy += ["a clip render" for j in song.jobs if j["state"] in pipeline.ACTIVE]
+        if busy:
+            raise HttpError(409, f"Wait until this finishes: {', '.join(dict.fromkeys(busy))}.")
+        if method == "DELETE":
+            songs.delete(song)
+            return {"deleted": song.slug}
+        title = body.get("title") or ""
+        songs.rename(song, title)
         return state(song)
     if key == ("GET", "peaks"):
         return pipeline.peaks(song)
@@ -466,6 +481,13 @@ def route(method, path, q, body, h):
                 need_unlocked(s)
                 s["refs"]["add"] = [r for r in s["refs"]["add"] if r["id"] != rest[3]]
                 song.save_plan()
+                return state(song)
+            if method == "GET" and action == "last-frame":   # preview for the dialog
+                frame, src = pipeline.last_frame(song, s)
+                return {"file": str(frame.relative_to(song.dir)), "source": src}
+            if method == "POST" and action == "last-frame":
+                need_unlocked(s)
+                pipeline.copy_last_frame(song, s, body.get("use"))
                 return state(song)
             if method == "POST" and action == "mark-failed":
                 pipeline.mark_job_failed(song, s["uid"])
